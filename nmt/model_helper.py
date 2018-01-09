@@ -59,7 +59,8 @@ class ExtraArgs(collections.namedtuple(
 
 
 class TrainModel(
-    collections.namedtuple("TrainModel", ("graph", "model", "iterator",
+    collections.namedtuple("TrainModel", ("graph", "model",
+                                          "iterator_src", "iterator_tgt",
                                           "skip_count_placeholder"))):
   pass
 
@@ -83,7 +84,24 @@ def create_train_model(
     tgt_dataset = tf.data.TextLineDataset(tgt_file)
     skip_count_placeholder = tf.placeholder(shape=(), dtype=tf.int64)
 
-    iterator = iterator_utils.get_iterator(
+    # set real values
+    iterator_src = iterator_utils.get_iterator(
+        src_dataset,
+        tgt_dataset,
+        src_vocab_table,
+        tgt_vocab_table,
+        batch_size=hparams.batch_size,
+        sos=hparams.sos,
+        eos=hparams.eos,
+        random_seed=hparams.random_seed,
+        num_buckets=hparams.num_buckets,
+        src_max_len=hparams.src_max_len,
+        tgt_max_len=hparams.tgt_max_len,
+        skip_count=skip_count_placeholder,
+        num_shards=num_workers,
+        shard_index=jobid)
+
+    iterator_tgt = iterator_utils.get_iterator(
         src_dataset,
         tgt_dataset,
         src_vocab_table,
@@ -106,7 +124,8 @@ def create_train_model(
     with tf.device(model_device_fn):
       model = model_creator(
           hparams,
-          iterator=iterator,
+          iterator_src=iterator_src,
+          iterator_tgt=iterator_tgt,
           mode=tf.contrib.learn.ModeKeys.TRAIN,
           source_vocab_table=src_vocab_table,
           target_vocab_table=tgt_vocab_table,
@@ -116,14 +135,16 @@ def create_train_model(
   return TrainModel(
       graph=graph,
       model=model,
-      iterator=iterator,
+      iterator_src=iterator_src,
+      iterator_tgt=iterator_tgt,
       skip_count_placeholder=skip_count_placeholder)
 
 
 class EvalModel(
     collections.namedtuple("EvalModel",
                            ("graph", "model", "src_file_placeholder",
-                            "tgt_file_placeholder", "iterator"))):
+                            "tgt_file_placeholder",
+                            "iterator_src", "iterator_tgt"))):
   pass
 
 
@@ -140,7 +161,21 @@ def create_eval_model(model_creator, hparams, scope=None, extra_args=None):
     tgt_file_placeholder = tf.placeholder(shape=(), dtype=tf.string)
     src_dataset = tf.data.TextLineDataset(src_file_placeholder)
     tgt_dataset = tf.data.TextLineDataset(tgt_file_placeholder)
-    iterator = iterator_utils.get_iterator(
+    
+    # set real values
+    iterator_src = iterator_utils.get_iterator(
+        src_dataset,
+        tgt_dataset,
+        src_vocab_table,
+        tgt_vocab_table,
+        hparams.batch_size,
+        sos=hparams.sos,
+        eos=hparams.eos,
+        random_seed=hparams.random_seed,
+        num_buckets=hparams.num_buckets,
+        src_max_len=hparams.src_max_len_infer,
+        tgt_max_len=hparams.tgt_max_len_infer)
+    iterator_tgt = iterator_utils.get_iterator(
         src_dataset,
         tgt_dataset,
         src_vocab_table,
@@ -154,7 +189,8 @@ def create_eval_model(model_creator, hparams, scope=None, extra_args=None):
         tgt_max_len=hparams.tgt_max_len_infer)
     model = model_creator(
         hparams,
-        iterator=iterator,
+        iterator_src=iterator_src,
+        iterator_tgt=iterator_tgt,
         mode=tf.contrib.learn.ModeKeys.EVAL,
         source_vocab_table=src_vocab_table,
         target_vocab_table=tgt_vocab_table,
@@ -165,13 +201,15 @@ def create_eval_model(model_creator, hparams, scope=None, extra_args=None):
       model=model,
       src_file_placeholder=src_file_placeholder,
       tgt_file_placeholder=tgt_file_placeholder,
-      iterator=iterator)
+      iterator_src=iterator_src,
+      iterator_tgt=iterator_tgt)
 
 
 class InferModel(
     collections.namedtuple("InferModel",
                            ("graph", "model", "src_placeholder",
-                            "batch_size_placeholder", "iterator"))):
+                            "batch_size_placeholder",
+                            "iterator_src", "iterator_tgt"))):
   pass
 
 
@@ -192,7 +230,14 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
 
     src_dataset = tf.data.Dataset.from_tensor_slices(
         src_placeholder)
-    iterator = iterator_utils.get_infer_iterator(
+    # set real values
+    iterator_src = iterator_utils.get_infer_iterator(
+        src_dataset,
+        src_vocab_table,
+        batch_size=batch_size_placeholder,
+        eos=hparams.eos,
+        src_max_len=hparams.src_max_len_infer)
+    iterator_tgt = iterator_utils.get_infer_iterator(
         src_dataset,
         src_vocab_table,
         batch_size=batch_size_placeholder,
@@ -200,7 +245,8 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
         src_max_len=hparams.src_max_len_infer)
     model = model_creator(
         hparams,
-        iterator=iterator,
+        iterator_src=iterator_src,
+        iterator_tgt=iterator_tgt,
         mode=tf.contrib.learn.ModeKeys.INFER,
         source_vocab_table=src_vocab_table,
         target_vocab_table=tgt_vocab_table,
@@ -212,7 +258,8 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
       model=model,
       src_placeholder=src_placeholder,
       batch_size_placeholder=batch_size_placeholder,
-      iterator=iterator)
+      iterator_src=iterator_src,
+      iterator_tgt=iterator_tgt)
 
 
 def _get_embed_device(vocab_size):
