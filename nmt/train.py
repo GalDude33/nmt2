@@ -270,8 +270,9 @@ def before_train(loaded_train_model, train_model, train_sess, global_step,
     # Initialize all of the iterators
     skip_count = hparams.batch_size * hparams.epoch_step
     utils.print_out("# Init train iterator, skipping %d elements" % skip_count)
+    # TODO: iterator_tgt
     train_sess.run(
-        train_model.iterator.initializer,
+        train_model.iterator_src.initializer,
         feed_dict={train_model.skip_count_placeholder: skip_count})
 
     return stats, info, start_train_time
