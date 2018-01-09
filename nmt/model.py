@@ -99,7 +99,9 @@ class BaseModel(object):
 
         # Embeddings
         self.init_embeddings(hparams, scope)
-        self.batch_size = tf.size(self.iterator.source_sequence_length)
+
+	# TODO: iterator_tgt
+        self.batch_size = tf.size(self.iterator_src.source_sequence_length)
 
         # Projection
         with tf.variable_scope(scope or "build_network"):
@@ -272,8 +274,9 @@ class BaseModel(object):
 
     def eval(self, sess):
         assert self.mode == tf.contrib.learn.ModeKeys.EVAL
-        return sess.run([self.eval_loss,
-                         self.predict_count,
+	# TODO: predict_count_tgt        
+	return sess.run([self.eval_loss,
+                         self.predict_count_src,
                          self.batch_size])
 
     def build_graph(self, hparams, scope=None):
@@ -314,7 +317,8 @@ class BaseModel(object):
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
                 with tf.device(model_helper.get_device_str(self.num_encoder_layers - 1,
                                                            self.num_gpus)):
-                    loss = self._compute_loss(logits)
+		    # TODO: iterator_tgt
+                    loss = self._compute_loss(logits, self.iterator_src)
             else:
                 loss = None
 
@@ -426,7 +430,8 @@ class BaseModel(object):
                 # We chose to apply the output_layer to all timesteps for speed:
                 #   10% improvements for small models & 20% for larger ones.
                 # If memory is a concern, we should apply output_layer per timestep.
-                logits = self.output_layer(outputs.rnn_output)
+                # TODO: output_layer_tgt
+		logits = self.output_layer_src(outputs.rnn_output)
 
             ## Inference
             else:
@@ -436,6 +441,7 @@ class BaseModel(object):
                 end_token = tgt_eos_id
 
                 if beam_width > 0:
+	            # TODO: output_layer_tgt
                     my_decoder = tf.contrib.seq2seq.BeamSearchDecoder(
                         cell=cell,
                         embedding=embedding,
@@ -443,7 +449,7 @@ class BaseModel(object):
                         end_token=end_token,
                         initial_state=decoder_initial_state,
                         beam_width=beam_width,
-                        output_layer=self.output_layer,
+                        output_layer=self.output_layer_src,
                         length_penalty_weight=length_penalty_weight)
                 else:
                     # Helper
@@ -458,11 +464,12 @@ class BaseModel(object):
                             embedding, start_tokens, end_token)
 
                     # Decoder
+		    # TODO: output_layer_tgt
                     my_decoder = tf.contrib.seq2seq.BasicDecoder(
                         cell,
                         helper,
                         decoder_initial_state,
-                        output_layer=self.output_layer  # applied per timestep
+                        output_layer=self.output_layer_src  # applied per timestep
                     )
 
                 # Dynamic decoding
