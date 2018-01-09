@@ -262,12 +262,13 @@ class BaseModel(object):
 
     def train(self, sess):
         assert self.mode == tf.contrib.learn.ModeKeys.TRAIN
+        # TODO: check for predict_count_tgt & word_count_tgt
         return sess.run([self.update,
                          self.train_loss,
-                         self.predict_count,
+                         self.predict_count_src,
                          self.train_summary,
                          self.global_step,
-                         self.word_count,
+                         self.word_count_src,
                          self.batch_size,
                          self.grad_norm,
                          self.learning_rate])
