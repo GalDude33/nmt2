@@ -532,7 +532,7 @@ def create_or_load_hparams(
   if save_hparams:
     utils.save_hparams(out_dir, hparams)
     for metric in hparams.metrics:
-      utils.save_hparams(getattr(hparams, "best_" + metric + "_dir"), hparams)
+      utils.save_hparams(out_dir+"/best_" + metric + "_dir", hparams)
 
   # Print HParams
   utils.print_hparams(hparams)

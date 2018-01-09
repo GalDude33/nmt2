@@ -40,7 +40,8 @@ class BaseModel(object):
     def __init__(self,
                  hparams,
                  mode,
-                 iterator,
+                 iterator_src: iterator_utils.BatchedInput,
+                 iterator_tgt: iterator_utils.BatchedInput,
                  source_vocab_table,
                  target_vocab_table,
                  reverse_target_vocab_table=None,
@@ -60,8 +61,9 @@ class BaseModel(object):
       extra_args: model_helper.ExtraArgs, for passing customizable functions.
 
     """
-        assert isinstance(iterator, iterator_utils.BatchedInput)
-        self.iterator = iterator
+        assert isinstance(iterator_src, iterator_utils.BatchedInput)
+        assert isinstance(iterator_tgt, iterator_utils.BatchedInput)
+        self.iterator_src = iterator_src
         self.mode = mode
         self.src_vocab_table = source_vocab_table
         self.tgt_vocab_table = target_vocab_table
@@ -102,17 +104,19 @@ class BaseModel(object):
         # Projection
         with tf.variable_scope(scope or "build_network"):
             with tf.variable_scope("decoder/output_projection"):
-                self.output_layer = layers_core.Dense(
-                    hparams.tgt_vocab_size, use_bias=False, name="output_projection")
+                self.output_layer_src = layers_core.Dense(
+                    hparams.tgt_vocab_size, use_bias=False, name="output_projection_src")
+                #self.output_layer_tgt = layers_core.Dense(
+                #    hparams.tgt_vocab_size, use_bias=False, name="output_projection_tgt")
 
         # Train graph
         res = self.build_graph(hparams, scope=scope)
 
         if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
             self.train_loss = res[1]
-            self.word_count = tf.reduce_sum(
-                self.iterator.source_sequence_length) + tf.reduce_sum(
-                self.iterator.target_sequence_length)
+            self.word_count_src = tf.reduce_sum(
+                self.iterator_src.source_sequence_length) + tf.reduce_sum(
+                self.iterator_src.target_sequence_length)
         elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
             self.eval_loss = res[1]
         elif self.mode == tf.contrib.learn.ModeKeys.INFER:
@@ -122,8 +126,8 @@ class BaseModel(object):
 
         if self.mode != tf.contrib.learn.ModeKeys.INFER:
             ## Count the number of predicted words for compute ppl.
-            self.predict_count = tf.reduce_sum(
-                self.iterator.target_sequence_length)
+            self.predict_count_src = tf.reduce_sum(
+                self.iterator_src.target_sequence_length)
 
         self.global_step = tf.Variable(0, trainable=False)
         params = tf.trainable_variables()
@@ -298,12 +302,12 @@ class BaseModel(object):
         with tf.variable_scope(scope or "dynamic_seq2seq", dtype=dtype):
             # Encoder
             encoder_outputs, encoder_state = self._build_encoder(
-                hparams, iterator=self.iterator, embedding=self.embedding_encoder)
+                hparams, iterator=self.iterator_src, embedding=self.embedding_encoder)
 
             ## Decoder
             logits, sample_id, final_context_state = self._build_decoder(
                 encoder_outputs, encoder_state, hparams,
-                iterator=self.iterator,
+                iterator=self.iterator_src,
                 embedding=self.embedding_encoder)
 
             ## Loss
@@ -499,16 +503,16 @@ class BaseModel(object):
     """
         pass
 
-    def _compute_loss(self, logits):
+    def _compute_loss(self, logits, iterator):
         """Compute optimization loss."""
-        target_output = self.iterator.target_output
+        target_output = iterator.target_output
         if self.time_major:
             target_output = tf.transpose(target_output)
         max_time = self.get_max_time(target_output)
         crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(
             labels=target_output, logits=logits)
         target_weights = tf.sequence_mask(
-            self.iterator.target_sequence_length, max_time, dtype=logits.dtype)
+            iterator.target_sequence_length, max_time, dtype=logits.dtype)
         if self.time_major:
             target_weights = tf.transpose(target_weights)
 
@@ -558,7 +562,6 @@ class Model(BaseModel):
         """Build an encoder."""
         num_layers = self.num_encoder_layers
         num_residual_layers = self.num_encoder_residual_layers
-        iterator = self.iterator
 
         source = iterator.source
         if self.time_major:
