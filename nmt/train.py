@@ -111,18 +111,21 @@ def run_external_eval(infer_model, infer_sess, model_dir, hparams,
 
     dev_src_file = "%s.%s" % (hparams.dev_prefix, hparams.src)
     dev_tgt_file = "%s.%s" % (hparams.dev_prefix, hparams.tgt)
-    dev_infer_iterator_feed_dict = {
+    dev_infer_iterator_src_feed_dict = {
         infer_model.src_placeholder: inference.load_data(dev_src_file),
         infer_model.batch_size_placeholder: hparams.infer_batch_size,
     }
-    # TODO: iterator_tgt
+    dev_infer_iterator_tgt_feed_dict = {
+        infer_model.src_placeholder: inference.load_data(dev_tgt_file),
+        infer_model.batch_size_placeholder: hparams.infer_batch_size,
+    }
     dev_scores = _external_eval(
         loaded_infer_model,
         global_step,
         infer_sess,
         hparams,
         infer_model.iterator_src,
-        dev_infer_iterator_feed_dict,
+        dev_infer_iterator_src_feed_dict,
         dev_tgt_file,
         "dev",
         summary_writer,

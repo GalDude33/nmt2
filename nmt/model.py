@@ -310,6 +310,12 @@ class BaseModel(object):
             encoder_outputs_tgt, encoder_state_tgt = self._build_encoder(
                 hparams, iterator=self.iterator_tgt, embedding=self.embedding_tgt)
 
+            # Discriminator
+            discriminator_logits_src, _ = \
+                self._build_discriminator(encoder_outputs_src)
+            discriminator_logits_tgt, _ = \
+                self._build_discriminator(encoder_outputs_tgt)
+
             ## Decoder
             logits_src, sample_id_src, final_context_state_src = self._build_decoder(
                 encoder_outputs_src, encoder_state_src, hparams,
@@ -325,9 +331,15 @@ class BaseModel(object):
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
                 with tf.device(model_helper.get_device_str(self.num_encoder_layers - 1,
                                                            self.num_gpus)):
-                    loss_src = self._compute_loss(logits_src, self.iterator_src)
-                    loss_tgt = self._compute_loss(logits_tgt, self.iterator_tgt)
-                    loss = tf.add(loss_src, loss_tgt, 'total_loss')
+                    loss_auto_src = self._compute_loss(logits_src, self.iterator_src)
+                    loss_auto_tgt = self._compute_loss(logits_tgt, self.iterator_tgt)
+                    loss_D_src = self._compute_discriminator_loss(discriminator_logits_src,
+                                                                  tf.zeros_like(self.iterator_src.source))
+                    loss_D_tgt = self._compute_discriminator_loss(discriminator_logits_tgt,
+                                                                  tf.ones_like(self.iterator_tgt.source))
+                    loss_auto_total = tf.add(loss_auto_src, loss_auto_tgt, 'total_auto_loss')
+                    loss_D_total = tf.add(loss_D_src, loss_D_tgt, 'total_D_loss')
+                    loss = tf.add(loss_auto_total, loss_D_total, 'total_loss')
             else:
                 loss = None
 
@@ -562,6 +574,17 @@ class BaseModel(object):
             # time, beam_width] shape.
             sample_words = sample_words.transpose([2, 0, 1])
         return sample_words, infer_summary
+
+    def _build_discriminator(self, outputs):
+        with tf.variable_scope("discriminator", reuse=tf.AUTO_REUSE):
+            outputs = tf.layers.dense(outputs, 256, activation=tf.nn.tanh, name='dense1_D')
+            outputs = tf.layers.dense(outputs, 256, activation=tf.nn.tanh, name='dense2_D')
+            outputs = tf.layers.dense(outputs, 2, activation=tf.nn.tanh, name='dense_last_D')
+        return outputs, tf.nn.softmax(outputs)
+
+    def _compute_discriminator_loss(self, logits, labels):
+        return tf.losses.sparse_softmax_cross_entropy(logits=logits,
+                                                      labels=labels)
 
 
 class Model(BaseModel):
