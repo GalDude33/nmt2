@@ -64,6 +64,7 @@ class BaseModel(object):
         assert isinstance(iterator_src, iterator_utils.BatchedInput)
         assert isinstance(iterator_tgt, iterator_utils.BatchedInput)
         self.iterator_src = iterator_src
+        self.iterator_tgt = iterator_tgt
         self.mode = mode
         self.src_vocab_table = source_vocab_table
         self.tgt_vocab_table = target_vocab_table
@@ -107,9 +108,9 @@ class BaseModel(object):
         with tf.variable_scope(scope or "build_network"):
             with tf.variable_scope("decoder/output_projection"):
                 self.output_layer_src = layers_core.Dense(
-                    hparams.tgt_vocab_size, use_bias=False, name="output_projection_src")
-                # self.output_layer_tgt = layers_core.Dense(
-                #    hparams.tgt_vocab_size, use_bias=False, name="output_projection_tgt")
+                    hparams.src_vocab_size, use_bias=False, name="output_projection_src")
+                self.output_layer_tgt = layers_core.Dense(
+                    hparams.tgt_vocab_size, use_bias=False, name="output_projection_tgt")
 
         # Train graph
         res = self.build_graph(hparams, scope=scope)
@@ -173,8 +174,7 @@ class BaseModel(object):
             self.infer_summary = self._get_infer_summary(hparams)
 
         # Saver
-        self.saver = tf.train.Saver(
-            tf.global_variables(), max_to_keep=hparams.num_keep_ckpts)
+        self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=hparams.num_keep_ckpts)
 
         # Print trainable variables
         utils.print_out("# Trainable variables")
@@ -245,7 +245,7 @@ class BaseModel(object):
 
     def init_embeddings(self, hparams, scope):
         """Init embeddings."""
-        self.embedding_encoder, self.embedding_decoder = (
+        self.embedding_src, self.embedding_tgt = (
             model_helper.create_emb_for_encoder_and_decoder(
                 share_vocab=hparams.share_vocab,
                 src_vocab_size=self.src_vocab_size,
@@ -258,7 +258,7 @@ class BaseModel(object):
                 src_embed_file=hparams.src_embed_file,
                 tgt_embed_file=hparams.tgt_embed_file,
                 scope=scope, ))
-        self.embedding_decoder = self.embedding_encoder
+        # self.embedding_decoder = self.embedding_encoder
 
     def train(self, sess):
         assert self.mode == tf.contrib.learn.ModeKeys.TRAIN
@@ -305,25 +305,33 @@ class BaseModel(object):
 
         with tf.variable_scope(scope or "dynamic_seq2seq", dtype=dtype):
             # Encoder
-            encoder_outputs, encoder_state = self._build_encoder(
-                hparams, iterator=self.iterator_src, embedding=self.embedding_encoder)
+            encoder_outputs_src, encoder_state_src = self._build_encoder(
+                hparams, iterator=self.iterator_src, embedding=self.embedding_src)
+            encoder_outputs_tgt, encoder_state_tgt = self._build_encoder(
+                hparams, iterator=self.iterator_tgt, embedding=self.embedding_tgt)
 
             ## Decoder
-            logits, sample_id, final_context_state = self._build_decoder(
-                encoder_outputs, encoder_state, hparams,
-                iterator=self.iterator_src,
-                embedding=self.embedding_encoder)
+            logits_src, sample_id_src, final_context_state_src = self._build_decoder(
+                encoder_outputs_src, encoder_state_src, hparams,
+                iterator=self.iterator_src, embedding=self.embedding_src,
+                vocab_table=self.src_vocab_table, output_layer=self.output_layer_src)
+
+            logits_tgt, sample_id_tgt, final_context_state_tgt = self._build_decoder(
+                encoder_outputs_tgt, encoder_state_tgt, hparams,
+                iterator=self.iterator_tgt, embedding=self.embedding_tgt,
+                vocab_table=self.tgt_vocab_table, output_layer=self.output_layer_tgt)
 
             ## Loss
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
                 with tf.device(model_helper.get_device_str(self.num_encoder_layers - 1,
                                                            self.num_gpus)):
-                    # TODO: iterator_tgt
-                    loss = self._compute_loss(logits, self.iterator_src)
+                    loss_src = self._compute_loss(logits_src, self.iterator_src)
+                    loss_tgt = self._compute_loss(logits_tgt, self.iterator_tgt)
+                    loss = tf.add(loss_src, loss_tgt, 'total_loss')
             else:
                 loss = None
 
-            return logits, loss, final_context_state, sample_id
+            return logits_src, loss, final_context_state_src, sample_id_src
 
     @abc.abstractmethod
     def _build_encoder(self, hparams, iterator, embedding) -> tuple:
@@ -369,7 +377,7 @@ class BaseModel(object):
         return maximum_iterations
 
     def _build_decoder(self, encoder_outputs, encoder_state, hparams,
-                       iterator, embedding):
+                       iterator, embedding, vocab_table, output_layer):
         """Build and run a RNN decoder with a final projection layer.
 
     Args:
@@ -381,9 +389,9 @@ class BaseModel(object):
       A tuple of final logits and final decoder state:
         logits: size [time, batch_size, vocab_size] when time_major=True.
     """
-        tgt_sos_id = tf.cast(self.tgt_vocab_table.lookup(tf.constant(hparams.sos)),
+        tgt_sos_id = tf.cast(vocab_table.lookup(tf.constant(hparams.sos)),
                              tf.int32)
-        tgt_eos_id = tf.cast(self.tgt_vocab_table.lookup(tf.constant(hparams.eos)),
+        tgt_eos_id = tf.cast(vocab_table.lookup(tf.constant(hparams.eos)),
                              tf.int32)
 
         # maximum_iteration: The maximum decoding steps.
@@ -391,7 +399,7 @@ class BaseModel(object):
             hparams, iterator.source_sequence_length)
 
         ## Decoder.
-        with tf.variable_scope("decoder") as decoder_scope:
+        with tf.variable_scope("decoder", reuse=tf.AUTO_REUSE) as decoder_scope:
             cell, decoder_initial_state = self._build_decoder_cell(
                 hparams, encoder_outputs, encoder_state,
                 iterator.source_sequence_length)
@@ -431,8 +439,7 @@ class BaseModel(object):
                 # We chose to apply the output_layer to all timesteps for speed:
                 #   10% improvements for small models & 20% for larger ones.
                 # If memory is a concern, we should apply output_layer per timestep.
-                # TODO: output_layer_tgt
-                logits = self.output_layer_src(outputs.rnn_output)
+                logits = output_layer(outputs.rnn_output)
 
             ## Inference
             else:
@@ -442,7 +449,6 @@ class BaseModel(object):
                 end_token = tgt_eos_id
 
                 if beam_width > 0:
-                    # TODO: output_layer_tgt
                     my_decoder = tf.contrib.seq2seq.BeamSearchDecoder(
                         cell=cell,
                         embedding=embedding,
@@ -450,7 +456,7 @@ class BaseModel(object):
                         end_token=end_token,
                         initial_state=decoder_initial_state,
                         beam_width=beam_width,
-                        output_layer=self.output_layer_src,
+                        output_layer=output_layer,
                         length_penalty_weight=length_penalty_weight)
                 else:
                     # Helper
@@ -465,12 +471,11 @@ class BaseModel(object):
                             embedding, start_tokens, end_token)
 
                     # Decoder
-                    # TODO: output_layer_tgt
                     my_decoder = tf.contrib.seq2seq.BasicDecoder(
                         cell,
                         helper,
                         decoder_initial_state,
-                        output_layer=self.output_layer_src  # applied per timestep
+                        output_layer=output_layer  # applied per timestep
                     )
 
                 # Dynamic decoding

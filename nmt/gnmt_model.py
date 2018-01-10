@@ -73,7 +73,7 @@ class GNMTModel(attention_model.AttentionModel):
         if self.time_major:
             source = tf.transpose(source)
 
-        with tf.variable_scope("encoder") as scope:
+        with tf.variable_scope("encoder", reuse=tf.AUTO_REUSE) as scope:
             dtype = scope.dtype
 
             # Look up embedding, emp_inp: [max_time, batch_size, num_units]
@@ -182,21 +182,17 @@ class GNMTModel(attention_model.AttentionModel):
             name="attention")
 
         if attention_architecture == "gnmt":
-            cell = GNMTAttentionMultiCell(
-                attention_cell, cell_list)
+            cell = GNMTAttentionMultiCell(attention_cell, cell_list)
         elif attention_architecture == "gnmt_v2":
-            cell = GNMTAttentionMultiCell(
-                attention_cell, cell_list, use_new_attention=True)
+            cell = GNMTAttentionMultiCell(attention_cell, cell_list, use_new_attention=True)
         else:
-            raise ValueError(
-                "Unknown attention_architecture %s" % attention_architecture)
+            raise ValueError("Unknown attention_architecture %s" % attention_architecture)
 
         if hparams.pass_hidden_state:
             decoder_initial_state = tuple(
                 zs.clone(cell_state=es)
                 if isinstance(zs, tf.contrib.seq2seq.AttentionWrapperState) else es
-                for zs, es in zip(
-                    cell.zero_state(batch_size, dtype), encoder_state))
+                for zs, es in zip(cell.zero_state(batch_size, dtype), encoder_state))
         else:
             decoder_initial_state = cell.zero_state(batch_size, dtype)
 

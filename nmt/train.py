@@ -67,26 +67,36 @@ def run_internal_eval(
 
     dev_src_file = "%s.%s" % (hparams.dev_prefix, hparams.src)
     dev_tgt_file = "%s.%s" % (hparams.dev_prefix, hparams.tgt)
-    dev_eval_iterator_feed_dict = {
+    dev_eval_iterator_src_feed_dict = {
         eval_model.src_file_placeholder: dev_src_file,
+        eval_model.tgt_file_placeholder: dev_src_file
+    }
+    dev_eval_iterator_tgt_feed_dict = {
+        eval_model.src_file_placeholder: dev_tgt_file,
         eval_model.tgt_file_placeholder: dev_tgt_file
     }
 
     dev_ppl = _internal_eval(loaded_eval_model, global_step, eval_sess,
-                             eval_model.iterator_src, dev_eval_iterator_feed_dict,
+                             eval_model.iterator_src, eval_model.iterator_tgt,
+                             dev_eval_iterator_src_feed_dict, dev_eval_iterator_tgt_feed_dict,
                              summary_writer, "dev")
+
     test_ppl = None
     if use_test_set and hparams.test_prefix:
         test_src_file = "%s.%s" % (hparams.test_prefix, hparams.src)
         test_tgt_file = "%s.%s" % (hparams.test_prefix, hparams.tgt)
-        test_eval_iterator_feed_dict = {
+        test_eval_iterator_src_feed_dict = {
             eval_model.src_file_placeholder: test_src_file,
+            eval_model.tgt_file_placeholder: test_src_file
+        }
+        test_eval_iterator_tgt_feed_dict = {
+            eval_model.src_file_placeholder: test_tgt_file,
             eval_model.tgt_file_placeholder: test_tgt_file
         }
 
-        # TODO: check what needed to be done with iterator_tgt
         test_ppl = _internal_eval(loaded_eval_model, global_step, eval_sess,
-                                  eval_model.iterator_src, test_eval_iterator_feed_dict,
+                                  eval_model.iterator_src, eval_model.iterator_tgt,
+                                  test_eval_iterator_src_feed_dict, test_eval_iterator_tgt_feed_dict,
                                   summary_writer, "test")
     return dev_ppl, test_ppl
 
@@ -274,6 +284,9 @@ def before_train(loaded_train_model, train_model, train_sess, global_step,
     train_sess.run(
         train_model.iterator_src.initializer,
         feed_dict={train_model.skip_count_placeholder: skip_count})
+    train_sess.run(
+        train_model.iterator_tgt.initializer,
+        feed_dict={train_model.skip_count_placeholder: skip_count})
 
     return stats, info, start_train_time
 
@@ -377,7 +390,10 @@ def train(hparams, scope=None, target_session=""):
                                       summary_writer, global_step)
 
             train_sess.run(
-                train_model.iterator.initializer,
+                train_model.iterator_src.initializer,
+                feed_dict={train_model.skip_count_placeholder: 0})
+            train_sess.run(
+                train_model.iterator_tgt.initializer,
                 feed_dict={train_model.skip_count_placeholder: 0})
             continue
 
@@ -500,10 +516,13 @@ def _get_best_results(hparams):
     return ", ".join(tokens)
 
 
-def _internal_eval(model, global_step, sess, iterator, iterator_feed_dict,
+def _internal_eval(model, global_step, sess,
+                   iterator_src, iterator_tgt,
+                   iterator_src_feed_dict, iterator_tgt_feed_dict,
                    summary_writer, label):
     """Computing perplexity."""
-    sess.run(iterator.initializer, feed_dict=iterator_feed_dict)
+    sess.run(iterator_src.initializer, feed_dict=iterator_src_feed_dict)
+    sess.run(iterator_tgt.initializer, feed_dict=iterator_tgt_feed_dict)
     ppl = model_helper.compute_perplexity(model, sess, label)
     utils.add_summary(summary_writer, global_step, "%s_ppl" % label, ppl)
     return ppl
