@@ -404,9 +404,8 @@ def train(hparams, scope=None, target_session=""):
 
         # Process step_result, accumulate stats, and write summary
         global_step, info["learning_rate"], step_summary = update_stats(
-            stats, start_time, step_result_ae)
+            stats, start_time, step_result_ae, step_result_D)
         summary_writer.add_summary(step_summary, global_step)
-        summary_writer.add_summary(step_result_D[2], global_step)
 
         # Once in a while, we print statistics.
         if global_step - last_stats_step >= steps_per_stats:
