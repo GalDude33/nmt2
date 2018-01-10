@@ -226,7 +226,7 @@ def init_stats():
 
 def update_stats(stats, start_time, step_result, step_results_D):
     """Update stats: write summary and accumulate statistics."""
-    (_, _, step_loss, step_predict_count, step_summary, global_step,
+    (_, step_loss, step_predict_count, step_summary, global_step,
      step_word_count, batch_size, grad_norm, learning_rate) = step_result
     (_, step_loss_D, step_summary_D) = step_results_D
 
