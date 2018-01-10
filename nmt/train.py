@@ -221,7 +221,7 @@ def run_full_eval(model_dir, infer_model, infer_sess, eval_model, eval_sess,
 def init_stats():
     """Initialize statistics that we want to accumulate."""
     return {"step_time": 0.0, "loss": 0.0, "predict_count": 0.0,
-            "total_count": 0.0, "grad_norm": 0.0}
+            "total_count": 0.0, "grad_norm": 0.0, "loss_D": 0.0}
 
 
 def update_stats(stats, start_time, step_result, step_results_D):
@@ -238,7 +238,7 @@ def update_stats(stats, start_time, step_result, step_results_D):
     stats["grad_norm"] += grad_norm
     stats["loss_D"] += (step_loss_D * batch_size)
 
-    return global_step, learning_rate, tf.summary.merge(step_summary + step_summary_D)
+    return global_step, learning_rate, step_summary, step_summary_D
 
 
 def print_step_info(prefix, global_step, info, result_summary, log_f):
@@ -403,9 +403,10 @@ def train(hparams, scope=None, target_session=""):
             continue
 
         # Process step_result, accumulate stats, and write summary
-        global_step, info["learning_rate"], step_summary = update_stats(
+        global_step, info["learning_rate"], step_summary, step_summary_D = update_stats(
             stats, start_time, step_result_ae, step_result_D)
         summary_writer.add_summary(step_summary, global_step)
+        summary_writer.add_summary(step_summary_D, global_step)
 
         # Once in a while, we print statistics.
         if global_step - last_stats_step >= steps_per_stats:

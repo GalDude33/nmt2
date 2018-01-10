@@ -291,7 +291,7 @@ class BaseModel(object):
                            self.learning_rate])
         res_D = sess.run([self.update_D,
                           self.train_loss_D,
-                          self.train_summary])
+                          self.train_summary_D])
         return res_ae, res_D
 
     def eval(self, sess):
