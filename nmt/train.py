@@ -224,10 +224,11 @@ def init_stats():
             "total_count": 0.0, "grad_norm": 0.0}
 
 
-def update_stats(stats, start_time, step_result):
+def update_stats(stats, start_time, step_result, step_results_D):
     """Update stats: write summary and accumulate statistics."""
-    (_, step_loss, step_predict_count, step_summary, global_step,
+    (_, _, step_loss, step_predict_count, step_summary, global_step,
      step_word_count, batch_size, grad_norm, learning_rate) = step_result
+    (_, step_loss_D, step_summary_D) = step_results_D
 
     # Update statistics
     stats["step_time"] += (time.time() - start_time)
@@ -235,8 +236,9 @@ def update_stats(stats, start_time, step_result):
     stats["predict_count"] += step_predict_count
     stats["total_count"] += float(step_word_count)
     stats["grad_norm"] += grad_norm
+    stats["loss_D"] += (step_loss_D * batch_size)
 
-    return global_step, learning_rate, step_summary
+    return global_step, learning_rate, tf.summary.merge(step_summary + step_summary_D)
 
 
 def print_step_info(prefix, global_step, info, result_summary, log_f):
@@ -375,7 +377,7 @@ def train(hparams, scope=None, target_session=""):
         ### Run a step ###
         start_time = time.time()
         try:
-            step_result = loaded_train_model.train(train_sess)
+            step_result_ae, step_result_D = loaded_train_model.train(train_sess)
             hparams.epoch_step += 1
         except tf.errors.OutOfRangeError:
             # Finished going through the training dataset.  Go to next epoch.
@@ -402,8 +404,9 @@ def train(hparams, scope=None, target_session=""):
 
         # Process step_result, accumulate stats, and write summary
         global_step, info["learning_rate"], step_summary = update_stats(
-            stats, start_time, step_result)
+            stats, start_time, step_result_ae)
         summary_writer.add_summary(step_summary, global_step)
+        summary_writer.add_summary(step_result_D[2], global_step)
 
         # Once in a while, we print statistics.
         if global_step - last_stats_step >= steps_per_stats:

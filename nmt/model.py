@@ -116,14 +116,15 @@ class BaseModel(object):
         res = self.build_graph(hparams, scope=scope)
 
         if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
-            self.train_loss = res[1]
+            self.train_loss_ae = res[1]
+            self.train_loss_D = res[4]
             self.word_count_src = tf.reduce_sum(
                 self.iterator_src.source_sequence_length) + tf.reduce_sum(
                 self.iterator_src.target_sequence_length)
         elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
             self.eval_loss = res[1]
         elif self.mode == tf.contrib.learn.ModeKeys.INFER:
-            self.infer_logits, _, self.final_context_state, self.sample_id = res
+            self.infer_logits, _, self.final_context_state, self.sample_id, _ = res
             self.sample_words = reverse_target_vocab_table.lookup(
                 tf.to_int64(self.sample_id))
 
@@ -131,9 +132,13 @@ class BaseModel(object):
             ## Count the number of predicted words for compute ppl.
             self.predict_count_src = tf.reduce_sum(
                 self.iterator_src.target_sequence_length)
+            self.predict_count_tgt = tf.reduce_sum(
+                self.iterator_tgt.target_sequence_length)
 
         self.global_step = tf.Variable(0, trainable=False)
-        params = tf.trainable_variables()
+
+        params_D = tf.trainable_variables(scope='.*discriminator.*')
+        params_ae = list(set(tf.trainable_variables()) - set(params_D))
 
         # Gradients and SGD update operation for training the model.
         # Arrage for the embedding vars to appear at the beginning.
@@ -144,31 +149,37 @@ class BaseModel(object):
             # decay
             self.learning_rate = self._get_learning_rate_decay(hparams)
 
-            # Optimizer
-            if hparams.optimizer == "sgd":
-                opt = tf.train.GradientDescentOptimizer(self.learning_rate)
-                tf.summary.scalar("lr", self.learning_rate)
-            elif hparams.optimizer == "adam":
-                opt = tf.train.AdamOptimizer(self.learning_rate)
+            def train_params(train_vars, train_loss):
+                # Optimizer
+                if hparams.optimizer == "sgd":
+                    opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+                    tf.summary.scalar("lr", self.learning_rate)
+                elif hparams.optimizer == "adam":
+                    opt = tf.train.AdamOptimizer(self.learning_rate)
 
-            # Gradients
-            gradients = tf.gradients(
-                self.train_loss,
-                params,
-                colocate_gradients_with_ops=hparams.colocate_gradients_with_ops)
+                # Gradients
+                gradients = tf.gradients(
+                    train_loss,
+                    train_vars,
+                    colocate_gradients_with_ops=hparams.colocate_gradients_with_ops)
 
-            clipped_grads, grad_norm_summary, grad_norm = model_helper.gradient_clip(
-                gradients, max_gradient_norm=hparams.max_gradient_norm)
-            self.grad_norm = grad_norm
+                clipped_grads, grad_norm_summary, grad_norm = model_helper.gradient_clip(
+                    gradients, max_gradient_norm=hparams.max_gradient_norm)
+                grad_norm = grad_norm
 
-            self.update = opt.apply_gradients(
-                zip(clipped_grads, params), global_step=self.global_step)
+                update = opt.apply_gradients(
+                    zip(clipped_grads, train_vars), global_step=self.global_step)
 
-            # Summary
-            self.train_summary = tf.summary.merge([
-                                                      tf.summary.scalar("lr", self.learning_rate),
-                                                      tf.summary.scalar("train_loss", self.train_loss),
-                                                  ] + grad_norm_summary)
+                # Summary
+                train_summary = tf.summary.merge([
+                                                     tf.summary.scalar("lr", self.learning_rate),
+                                                     tf.summary.scalar("train_loss", train_loss),
+                                                 ] + grad_norm_summary)
+                return grad_norm, update, train_summary
+
+            self.grad_norm_ae, self.update_ae, self.train_summary = train_params(params_ae, self.train_loss_ae)
+            self.grad_norm_D, self.update_D, self.train_summary_D = train_params(params_D, self.train_loss_D)
+            self.train_summary = tf.summary.merge([self.train_summary, self.train_summary_D])
 
         if self.mode == tf.contrib.learn.ModeKeys.INFER:
             self.infer_summary = self._get_infer_summary(hparams)
@@ -178,7 +189,13 @@ class BaseModel(object):
 
         # Print trainable variables
         utils.print_out("# Trainable variables")
-        for param in params:
+
+        utils.print_out('AutoEncoder params')
+        for param in params_ae:
+            utils.print_out("  %s, %s, %s" % (param.name, str(param.get_shape()),
+                                              param.op.device))
+        utils.print_out('Discriminator params')
+        for param in params_D:
             utils.print_out("  %s, %s, %s" % (param.name, str(param.get_shape()),
                                               param.op.device))
 
@@ -263,15 +280,19 @@ class BaseModel(object):
     def train(self, sess):
         assert self.mode == tf.contrib.learn.ModeKeys.TRAIN
         # TODO: check for predict_count_tgt & word_count_tgt
-        return sess.run([self.update,
-                         self.train_loss,
-                         self.predict_count_src,
-                         self.train_summary,
-                         self.global_step,
-                         self.word_count_src,
-                         self.batch_size,
-                         self.grad_norm,
-                         self.learning_rate])
+        res_ae = sess.run([self.update_ae,
+                           self.train_loss_ae,
+                           self.predict_count_src,
+                           self.train_summary,
+                           self.global_step,
+                           self.word_count_src,
+                           self.batch_size,
+                           self.grad_norm_ae,
+                           self.learning_rate])
+        res_D = sess.run([self.update_D,
+                          self.train_loss_D,
+                          self.train_summary])
+        return res_ae, res_D
 
     def eval(self, sess):
         assert self.mode == tf.contrib.learn.ModeKeys.EVAL
@@ -333,17 +354,26 @@ class BaseModel(object):
                                                            self.num_gpus)):
                     loss_auto_src = self._compute_loss(logits_src, self.iterator_src)
                     loss_auto_tgt = self._compute_loss(logits_tgt, self.iterator_tgt)
+
+                    D_labels_src = tf.zeros_like(self.iterator_src.source)
                     loss_D_src = self._compute_discriminator_loss(discriminator_logits_src,
-                                                                  tf.zeros_like(self.iterator_src.source))
+                                                                  D_labels_src)
+                    D_labels_tgt = tf.ones_like(self.iterator_tgt.source)
                     loss_D_tgt = self._compute_discriminator_loss(discriminator_logits_tgt,
-                                                                  tf.ones_like(self.iterator_tgt.source))
+                                                                  D_labels_tgt)
+                    loss_adv_src = self._compute_discriminator_loss(discriminator_logits_src,
+                                                                    1 - D_labels_src)
+                    loss_adv_tgt = self._compute_discriminator_loss(discriminator_logits_tgt,
+                                                                    1 - D_labels_tgt)
+                    loss_adv = tf.add(loss_adv_src, loss_adv_tgt, name='loss_adv')
                     loss_auto_total = tf.add(loss_auto_src, loss_auto_tgt, 'total_auto_loss')
                     loss_D_total = tf.add(loss_D_src, loss_D_tgt, 'total_D_loss')
-                    loss = tf.add(loss_auto_total, loss_D_total, 'total_loss')
+                    loss = tf.add_n([loss_auto_total, loss_D_total], 'total_loss')
             else:
                 loss = None
+                loss_adv = None
 
-            return logits_src, loss, final_context_state_src, sample_id_src
+            return logits_src, loss, final_context_state_src, sample_id_src, loss_adv
 
     @abc.abstractmethod
     def _build_encoder(self, hparams, iterator, embedding) -> tuple:
