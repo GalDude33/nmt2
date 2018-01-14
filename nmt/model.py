@@ -337,7 +337,7 @@ class BaseModel(object):
             discriminator_logits_tgt, _ = \
                 self._build_discriminator(encoder_outputs_tgt)
 
-            ## Decoder
+            # Decoder
             logits_src, sample_id_src, final_context_state_src = self._build_decoder(
                 encoder_outputs_src, encoder_state_src, hparams,
                 iterator=self.iterator_src, embedding=self.embedding_src,
@@ -348,7 +348,19 @@ class BaseModel(object):
                 iterator=self.iterator_tgt, embedding=self.embedding_tgt,
                 vocab_table=self.tgt_vocab_table, output_layer=self.output_layer_tgt)
 
-            ## Loss
+            # Cross Domain Translation
+            # Tanslate with infer model
+
+            # Encode with src, tgt
+            # encoder_outputs_src, encoder_state_src = self._build_encoder(
+            #     hparams, iterator=#, embedding=self.embedding_src)
+            # encoder_outputs_tgt, encoder_state_tgt = self._build_encoder(
+            #     hparams, iterator=#, embedding=self.embedding_tgt)
+
+            # Decode with tgt, src
+
+
+            # Loss
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
                 with tf.device(model_helper.get_device_str(self.num_encoder_layers - 1,
                                                            self.num_gpus)):

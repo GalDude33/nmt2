@@ -244,9 +244,9 @@ def update_stats(stats, start_time, step_result, step_results_D):
 def print_step_info(prefix, global_step, info, result_summary, log_f):
     """Print all info at the current global step."""
     utils.print_out(
-        "%sstep %d lr %g step-time %.2fs wps %.2fK ppl %.2f gN %.2f %s, %s" %
+        "%sstep %d lr %g step-time %.2fs wps %.2fK ppl %.2f gN %.2f, loss_D %.2f, %s, %s" %
         (prefix, global_step, info["learning_rate"], info["avg_step_time"],
-         info["speed"], info["train_ppl"], info["avg_grad_norm"], result_summary,
+         info["speed"], info["train_ppl"], info["avg_grad_norm"], info["loss_D"], result_summary,
          time.ctime()),
         log_f)
 
@@ -257,6 +257,7 @@ def process_stats(stats, info, global_step, steps_per_stats, log_f):
     info["avg_step_time"] = stats["step_time"] / steps_per_stats
     info["avg_grad_norm"] = stats["grad_norm"] / steps_per_stats
     info["train_ppl"] = utils.safe_exp(stats["loss"] / stats["predict_count"])
+    info["loss_D"] = stats["loss_D"]
     info["speed"] = stats["total_count"] / (1000 * stats["step_time"])
 
     # Check for overflow
@@ -277,7 +278,8 @@ def before_train(loaded_train_model, train_model, train_sess, global_step,
     info = {"train_ppl": 0.0, "speed": 0.0, "avg_step_time": 0.0,
             "avg_grad_norm": 0.0,
             "learning_rate": loaded_train_model.learning_rate.eval(
-                session=train_sess)}
+                session=train_sess),
+            'loss_D' : 0.0}
     start_train_time = time.time()
     utils.print_out("# Start step %d, lr %g, %s" %
                     (global_step, info["learning_rate"], time.ctime()), log_f)
