@@ -47,8 +47,9 @@ def run_sample_decode(infer_model, infer_sess, model_dir, hparams,
             infer_model.model, model_dir, infer_sess, "infer")
 
     _sample_decode(loaded_infer_model, global_step, infer_sess, hparams,
-                   infer_model.iterator_src, src_data, tgt_data,
-                   infer_model.src_placeholder,
+                   infer_model.iterator_src, infer_model.iterator_tgt,
+                   src_data, tgt_data,
+                   infer_model.tgt_placeholder, infer_model.src_placeholder,
                    infer_model.batch_size_placeholder, summary_writer)
     # TODO: same for tgt
     # _sample_decode(loaded_infer_model, global_step, infer_sess, hparams,
@@ -279,7 +280,7 @@ def before_train(loaded_train_model, train_model, train_sess, global_step,
             "avg_grad_norm": 0.0,
             "learning_rate": loaded_train_model.learning_rate.eval(
                 session=train_sess),
-            'loss_D' : 0.0}
+            'loss_D': 0.0}
     start_train_time = time.time()
     utils.print_out("# Start step %d, lr %g, %s" %
                     (global_step, info["learning_rate"], time.ctime()), log_f)
@@ -379,7 +380,15 @@ def train(hparams, scope=None, target_session=""):
         ### Run a step ###
         start_time = time.time()
         try:
-            step_result_ae, step_result_D = loaded_train_model.train(train_sess)
+            (original_funcs_src, translated_funcs_tgt), (original_funcs_tgt, translated_funcs_src) = \
+                _sample_infer(infer_model, infer_sess, hparams,
+                              infer_model.iterator_src, infer_model.iterator_tgt,
+                              sample_src_data, sample_tgt_data,
+                              infer_model.src_placeholder, infer_model.tgt_placeholder,
+                              infer_model.batch_size_placeholder)
+            step_result_ae, step_result_D = loaded_train_model.train(train_sess,
+                                                                     (original_funcs_src, translated_funcs_tgt),
+                                                                     (original_funcs_tgt, translated_funcs_src))
             hparams.epoch_step += 1
         except tf.errors.OutOfRangeError:
             # Finished going through the training dataset.  Go to next epoch.
@@ -536,8 +545,32 @@ def _internal_eval(model, global_step, sess,
     return ppl
 
 
-def _sample_decode(model, global_step, sess, hparams, iterator, src_data,
-                   tgt_data, iterator_src_placeholder,
+def _sample_infer(model, sess, hparams,
+                  iterator_src, iterator_tgt, src_data, tgt_data,
+                  iterator_src_placeholder, iterator_tgt_placeholder,
+                  iterator_batch_size_placeholder):
+    """Pick a sentence and decode."""
+    decode_ids_src = [random.randint(0, len(src_data) - 1) for _ in range(hparams.batch_size)]
+    decode_ids_tgt = [random.randint(0, len(tgt_data) - 1) for _ in range(hparams.batch_size)]
+
+    input_data_src = [src_data[i] for i in decode_ids_src]
+    input_data_tgt = [tgt_data[i] for i in decode_ids_tgt]
+    iterator_feed_dict = {
+        iterator_src_placeholder: input_data_src,
+        iterator_tgt_placeholder: input_data_tgt,
+        iterator_batch_size_placeholder: hparams.batch_size,
+    }
+    sess.run([iterator_src.initializer, iterator_tgt.initializer],
+             feed_dict=iterator_feed_dict)
+    (_, _, sample_ids_src, _), (_, _, sample_ids_tgt, _) = model.infer(sess)
+
+    return (input_data_src, sample_ids_tgt), (input_data_tgt, sample_ids_src)
+
+
+def _sample_decode(model, global_step, sess, hparams,
+                   iterator_src, iterator_tgt,
+                   src_data, tgt_data,
+                   iterator_src_placeholder, iterator_tgt_placeholder,
                    iterator_batch_size_placeholder, summary_writer):
     """Pick a sentence and decode."""
     decode_id = random.randint(0, len(src_data) - 1)
@@ -545,9 +578,11 @@ def _sample_decode(model, global_step, sess, hparams, iterator, src_data,
 
     iterator_feed_dict = {
         iterator_src_placeholder: [src_data[decode_id]],
+        iterator_tgt_placeholder: [tgt_data[decode_id]],
         iterator_batch_size_placeholder: 1,
     }
-    sess.run(iterator.initializer, feed_dict=iterator_feed_dict)
+    sess.run([iterator_src.initializer, iterator_tgt.initializer],
+             feed_dict=iterator_feed_dict)
 
     nmt_outputs, attention_summary = model.decode(sess)
 

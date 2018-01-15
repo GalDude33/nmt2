@@ -90,7 +90,7 @@ def create_train_model(
             src_vocab_table,
             src_vocab_table,
             batch_size=hparams.batch_size,
-            sos=hparams.sos,
+            sos=hparams.sos_2src,
             eos=hparams.eos,
             random_seed=hparams.random_seed,
             num_buckets=hparams.num_buckets,
@@ -106,7 +106,7 @@ def create_train_model(
             tgt_vocab_table,
             tgt_vocab_table,
             batch_size=hparams.batch_size,
-            sos=hparams.sos,
+            sos=hparams.sos_2tgt,
             eos=hparams.eos,
             random_seed=hparams.random_seed,
             num_buckets=hparams.num_buckets,
@@ -168,7 +168,7 @@ def create_eval_model(model_creator, hparams, scope=None, extra_args=None):
             src_vocab_table,
             tgt_vocab_table,
             hparams.batch_size,
-            sos=hparams.sos,
+            sos=hparams.sos_2src,
             eos=hparams.eos,
             random_seed=hparams.random_seed,
             num_buckets=hparams.num_buckets,
@@ -180,7 +180,7 @@ def create_eval_model(model_creator, hparams, scope=None, extra_args=None):
             src_vocab_table,
             tgt_vocab_table,
             hparams.batch_size,
-            sos=hparams.sos,
+            sos=hparams.sos_2tgt,
             eos=hparams.eos,
             random_seed=hparams.random_seed,
             num_buckets=hparams.num_buckets,
@@ -206,10 +206,36 @@ def create_eval_model(model_creator, hparams, scope=None, extra_args=None):
 
 class InferModel(
     collections.namedtuple("InferModel",
-                           ("graph", "model", "src_placeholder",
+                           ("graph", "model",
+                            "src_placeholder", "tgt_placeholder",
                             "batch_size_placeholder",
                             "iterator_src", "iterator_tgt"))):
     pass
+
+
+# def create_infer_model_4train(model_creator, hparams,
+#                               train_model,
+#                               scope=None, extra_args=None):
+#     """Create inference model."""
+#     graph = tf.Graph()
+#     with graph.as_default(), tf.container(scope or "infer_4train"):
+#         model = model_creator(
+#             hparams,
+#             iterator_src=train_model.iterator_src,
+#             iterator_tgt=train_model.iterator_tgt,
+#             mode=tf.contrib.learn.ModeKeys.INFER,
+#             source_vocab_table=train_model.model.src_vocab_table,
+#             target_vocab_table=train_model.model.tgt_vocab_table,
+#             reverse_target_vocab_table=train_model.model.reverse_tgt_vocab_table,
+#             scope=scope,
+#             extra_args=extra_args)
+#     return InferModel(
+#         graph=graph,
+#         model=model,
+#         src_placeholder=None,
+#         batch_size_placeholder=None,
+#         iterator_src=None,
+#         iterator_tgt=None)
 
 
 def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
@@ -225,10 +251,13 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
             tgt_vocab_file, default_value=vocab_utils.UNK)
 
         src_placeholder = tf.placeholder(shape=[None], dtype=tf.string)
+        tgt_placeholder = tf.placeholder(shape=[None], dtype=tf.string)
         batch_size_placeholder = tf.placeholder(shape=[], dtype=tf.int64)
 
         src_dataset = tf.data.Dataset.from_tensor_slices(
             src_placeholder)
+        tgt_dataset = tf.data.Dataset.from_tensor_slices(
+            tgt_placeholder)
         # set real values
         iterator_src = iterator_utils.get_infer_iterator(
             src_dataset,
@@ -237,8 +266,8 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
             eos=hparams.eos,
             src_max_len=hparams.src_max_len_infer)
         iterator_tgt = iterator_utils.get_infer_iterator(
-            src_dataset,
-            src_vocab_table,
+            tgt_dataset,
+            tgt_vocab_table,
             batch_size=batch_size_placeholder,
             eos=hparams.eos,
             src_max_len=hparams.src_max_len_infer)
@@ -256,6 +285,7 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
         graph=graph,
         model=model,
         src_placeholder=src_placeholder,
+        tgt_placeholder=tgt_placeholder,
         batch_size_placeholder=batch_size_placeholder,
         iterator_src=iterator_src,
         iterator_tgt=iterator_tgt)

@@ -61,6 +61,10 @@ class BaseModel(object):
       extra_args: model_helper.ExtraArgs, for passing customizable functions.
 
     """
+        self.original_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
+        self.original_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
+        self.translated_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
+        self.translated_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
         assert isinstance(iterator_src, iterator_utils.BatchedInput)
         assert isinstance(iterator_tgt, iterator_utils.BatchedInput)
         self.iterator_src = iterator_src
@@ -116,17 +120,18 @@ class BaseModel(object):
         res = self.build_graph(hparams, scope=scope)
 
         if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
-            self.train_loss_ae = res[1]
-            self.train_loss_D = res[4]
+            self.train_loss_ae = res[2]
+            self.train_loss_D = res[3]
             self.word_count_src = tf.reduce_sum(
                 self.iterator_src.source_sequence_length) + tf.reduce_sum(
                 self.iterator_src.target_sequence_length)
         elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
-            self.eval_loss = res[1]
+            self.eval_loss = res[2]
         elif self.mode == tf.contrib.learn.ModeKeys.INFER:
-            self.infer_logits, _, self.final_context_state, self.sample_id, _ = res
-            self.sample_words = reverse_target_vocab_table.lookup(
-                tf.to_int64(self.sample_id))
+            self.infer_logits_src, self.final_context_state_src, self.sample_id_src = res[0]
+            self.infer_logits_tgt, self.final_context_state_tgt, self.sample_id_tgt = res[1]
+            self.sample_words_src = reverse_target_vocab_table.lookup(tf.to_int64(self.sample_id_src))
+            self.sample_words_tgt = reverse_target_vocab_table.lookup(tf.to_int64(self.sample_id_tgt))
 
         if self.mode != tf.contrib.learn.ModeKeys.INFER:
             ## Count the number of predicted words for compute ppl.
@@ -182,7 +187,7 @@ class BaseModel(object):
             self.train_summary = tf.summary.merge([self.train_summary, self.train_summary_D])
 
         if self.mode == tf.contrib.learn.ModeKeys.INFER:
-            self.infer_summary = self._get_infer_summary(hparams)
+            self.infer_summary_src, self.infer_summary_tgt = self._get_infer_summary(hparams)
 
         # Saver
         self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=hparams.num_keep_ckpts)
@@ -277,7 +282,9 @@ class BaseModel(object):
                 scope=scope, ))
         # self.embedding_decoder = self.embedding_encoder
 
-    def train(self, sess):
+    def train(self, sess,
+              original_funcs_src, translated_funcs_src,
+              original_funcs_tgt, translated_funcs_tgt):
         assert self.mode == tf.contrib.learn.ModeKeys.TRAIN
         # TODO: check for predict_count_tgt & word_count_tgt
         res_ae = sess.run([self.update_ae,
@@ -288,7 +295,13 @@ class BaseModel(object):
                            self.word_count_src,
                            self.batch_size,
                            self.grad_norm_ae,
-                           self.learning_rate])
+                           self.learning_rate],
+                          feed_dict={
+                              self.original_funcs_src_: original_funcs_src,
+                              self.translated_funcs_src_: translated_funcs_src,
+                              self.original_funcs_tgt_: original_funcs_tgt,
+                              self.translated_funcs_tgt_: translated_funcs_tgt,
+                          })
         res_D = sess.run([self.update_D,
                           self.train_loss_D,
                           self.train_summary_D])
@@ -341,24 +354,25 @@ class BaseModel(object):
             logits_src, sample_id_src, final_context_state_src = self._build_decoder(
                 encoder_outputs_src, encoder_state_src, hparams,
                 iterator=self.iterator_src, embedding=self.embedding_src,
-                vocab_table=self.src_vocab_table, output_layer=self.output_layer_src)
+                vocab_table=self.src_vocab_table, output_layer=self.output_layer_src,
+                sos=hparams.sos_2src)
 
             logits_tgt, sample_id_tgt, final_context_state_tgt = self._build_decoder(
                 encoder_outputs_tgt, encoder_state_tgt, hparams,
                 iterator=self.iterator_tgt, embedding=self.embedding_tgt,
-                vocab_table=self.tgt_vocab_table, output_layer=self.output_layer_tgt)
+                vocab_table=self.tgt_vocab_table, output_layer=self.output_layer_tgt,
+                sos=hparams.sos_2tgt)
 
             # Cross Domain Translation
             # Tanslate with infer model
 
-            # Encode with src, tgt
+            #Encode with src, tgt
             # encoder_outputs_src, encoder_state_src = self._build_encoder(
-            #     hparams, iterator=#, embedding=self.embedding_src)
+            #     hparams, iterator=, embedding=self.embedding_src)
             # encoder_outputs_tgt, encoder_state_tgt = self._build_encoder(
             #     hparams, iterator=#, embedding=self.embedding_tgt)
 
             # Decode with tgt, src
-
 
             # Loss
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
@@ -385,7 +399,9 @@ class BaseModel(object):
                 loss = None
                 loss_adv = None
 
-            return logits_src, loss, final_context_state_src, sample_id_src, loss_adv
+            return (logits_src, final_context_state_src, sample_id_src), \
+                   (logits_tgt, final_context_state_tgt, sample_id_tgt), \
+                   loss, loss_adv
 
     @abc.abstractmethod
     def _build_encoder(self, hparams, iterator, embedding) -> tuple:
@@ -431,7 +447,7 @@ class BaseModel(object):
         return maximum_iterations
 
     def _build_decoder(self, encoder_outputs, encoder_state, hparams,
-                       iterator, embedding, vocab_table, output_layer):
+                       iterator, embedding, vocab_table, output_layer, sos):
         """Build and run a RNN decoder with a final projection layer.
 
     Args:
@@ -443,7 +459,7 @@ class BaseModel(object):
       A tuple of final logits and final decoder state:
         logits: size [time, batch_size, vocab_size] when time_major=True.
     """
-        tgt_sos_id = tf.cast(vocab_table.lookup(tf.constant(hparams.sos)),
+        tgt_sos_id = tf.cast(vocab_table.lookup(tf.constant(sos)),
                              tf.int32)
         tgt_eos_id = tf.cast(vocab_table.lookup(tf.constant(hparams.eos)),
                              tf.int32)
@@ -588,12 +604,13 @@ class BaseModel(object):
         return loss
 
     def _get_infer_summary(self, hparams):
-        return tf.no_op()
+        return tf.no_op(), tf.no_op()
 
     def infer(self, sess):
         assert self.mode == tf.contrib.learn.ModeKeys.INFER
         return sess.run([
-            self.infer_logits, self.infer_summary, self.sample_id, self.sample_words
+            (self.infer_logits_src, self.infer_summary_src, self.sample_id_src, self.sample_words_src),
+            (self.infer_logits_tgt, self.infer_summary_tgt, self.sample_id_tgt, self.sample_words_tgt)
         ])
 
     def decode(self, sess):
@@ -606,7 +623,7 @@ class BaseModel(object):
       A tuple consiting of outputs, infer_summary.
         outputs: of size [batch_size, time]
     """
-        _, infer_summary, _, sample_words = self.infer(sess)
+        (_, infer_summary, _, sample_words), _ = self.infer(sess)
 
         # make sure outputs is of shape [batch_size, time] or [beam_width,
         # batch_size, time] when using beam search.
@@ -619,8 +636,8 @@ class BaseModel(object):
 
     def _build_discriminator(self, outputs):
         with tf.variable_scope("discriminator", reuse=tf.AUTO_REUSE):
-            outputs = tf.layers.dense(outputs, 256, activation=tf.nn.tanh, name='dense1_D')
-            outputs = tf.layers.dense(outputs, 256, activation=tf.nn.tanh, name='dense2_D')
+            outputs = tf.layers.dense(outputs, 1024, activation=tf.nn.tanh, name='dense1_D')
+            outputs = tf.layers.dense(outputs, 1024, activation=tf.nn.tanh, name='dense2_D')
             outputs = tf.layers.dense(outputs, 2, activation=tf.nn.tanh, name='dense_last_D')
         return outputs, tf.nn.softmax(outputs)
 
