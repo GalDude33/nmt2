@@ -613,6 +613,13 @@ class BaseModel(object):
             (self.infer_logits_tgt, self.infer_summary_tgt, self.sample_id_tgt, self.sample_words_tgt)
         ])
 
+    def infer_and_source(self, sess):
+        assert self.mode == tf.contrib.learn.ModeKeys.INFER
+        return sess.run([
+            (self.iterator_src.source, self.infer_logits_src, self.infer_summary_src, self.sample_id_src, self.sample_words_src),
+            (self.iterator_tgt.source, self.infer_logits_tgt, self.infer_summary_tgt, self.sample_id_tgt, self.sample_words_tgt)
+        ])
+
     def decode(self, sess):
         """Decode a batch.
 

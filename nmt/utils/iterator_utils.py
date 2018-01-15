@@ -25,9 +25,9 @@ __all__ = ["BatchedInput", "get_iterator", "get_infer_iterator"]
 # NOTE(ebrevdo): When we subclass this, instances' __dict__ becomes empty.
 class BatchedInput(
     collections.namedtuple("BatchedInput",
-                           ("initializer", "source", "target_input",
-                            "target_output", "source_sequence_length",
-                            "target_sequence_length"))):
+                           ("initializer", "source",
+                            "target_input", "target_output",
+                            "source_sequence_length", "target_sequence_length"))):
     pass
 
 

@@ -565,7 +565,7 @@ def _sample_infer(model, sess, hparams,
     }
     sess.run([iterator_src.initializer, iterator_tgt.initializer],
              feed_dict=iterator_feed_dict)
-    (_, _, sample_ids_src, _), (_, _, sample_ids_tgt, _) = model.infer(sess)
+    (input_data_src, _, _, sample_ids_src, _), (input_data_tgt, _, _, sample_ids_tgt, _) = model.infer_and_source(sess)
 
     return (input_data_src, sample_ids_tgt), (input_data_tgt, sample_ids_src)
 
