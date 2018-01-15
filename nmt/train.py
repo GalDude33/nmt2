@@ -109,10 +109,7 @@ def run_external_eval(infer_model, infer_sess, model_dir, hparams,
     dev_tgt_file = "%s.%s" % (hparams.dev_prefix, hparams.tgt)
     dev_infer_iterator_src_feed_dict = {
         infer_model.src_placeholder: inference.load_data(dev_src_file),
-        infer_model.batch_size_placeholder: hparams.infer_batch_size,
-    }
-    dev_infer_iterator_tgt_feed_dict = {
-        infer_model.src_placeholder: inference.load_data(dev_tgt_file),
+        infer_model.tgt_placeholder: inference.load_data(dev_tgt_file),
         infer_model.batch_size_placeholder: hparams.infer_batch_size,
     }
     dev_scores = _external_eval(
@@ -120,7 +117,7 @@ def run_external_eval(infer_model, infer_sess, model_dir, hparams,
         global_step,
         infer_sess,
         hparams,
-        infer_model.iterator_src,
+        infer_model.iterator_src, infer_model.iterator_tgt,
         dev_infer_iterator_src_feed_dict,
         dev_tgt_file,
         "dev",
@@ -134,15 +131,15 @@ def run_external_eval(infer_model, infer_sess, model_dir, hparams,
         test_tgt_file = "%s.%s" % (hparams.test_prefix, hparams.tgt)
         test_infer_iterator_feed_dict = {
             infer_model.src_placeholder: inference.load_data(test_src_file),
+            infer_model.tgt_placeholder: inference.load_data(test_tgt_file),
             infer_model.batch_size_placeholder: hparams.infer_batch_size,
         }
-        # TODO: iterator_tgt
         test_scores = _external_eval(
             loaded_infer_model,
             global_step,
             infer_sess,
             hparams,
-            infer_model.iterator_src,
+            infer_model.iterator_src, infer_model.iterator_tgt,
             test_infer_iterator_feed_dict,
             test_tgt_file,
             "test",
@@ -283,14 +280,9 @@ def before_train(loaded_train_model, train_model, train_sess, global_step,
     # Initialize all of the iterators
     skip_count = hparams.batch_size * hparams.epoch_step
     utils.print_out("# Init train iterator, skipping %d elements" % skip_count)
-    # TODO: iterator_tgt
     train_sess.run(
-        train_model.iterator_src.initializer,
+        [train_model.iterator_src.initializer, train_model.iterator_tgt.initializer],
         feed_dict={train_model.skip_count_placeholder: skip_count})
-    train_sess.run(
-        train_model.iterator_tgt.initializer,
-        feed_dict={train_model.skip_count_placeholder: skip_count})
-
     return stats, info, start_train_time
 
 
@@ -386,19 +378,16 @@ def train(hparams, scope=None, target_session=""):
                               infer_model.src_placeholder, infer_model.tgt_placeholder,
                               infer_model.batch_size_placeholder)
             step_result_ae, step_result_D = loaded_train_model.train(train_sess,
-                                                                     original_funcs_src, translated_funcs_tgt[:,:,0],
-                                                                     original_funcs_tgt, translated_funcs_src[:,:,0])
+                                                                     original_funcs_src, translated_funcs_tgt[:, :, 0],
+                                                                     original_funcs_tgt, translated_funcs_src[:, :, 0])
             hparams.epoch_step += 1
         except tf.errors.OutOfRangeError:
-            with infer_model.graph.as_default():
-                loaded_infer_model, _ = model_helper.create_or_load_model(
-                    infer_model.model, model_dir, infer_sess, "infer")
-
             # Finished going through the training dataset.  Go to next epoch.
             hparams.epoch_step = 0
             utils.print_out(
                 "# Finished an epoch, step %d. Perform external evaluation" %
                 global_step)
+
             run_sample_decode(infer_model, infer_sess, model_dir, hparams,
                               summary_writer, sample_src_data, sample_tgt_data)
             run_external_eval(infer_model, infer_sess, model_dir, hparams,
@@ -409,11 +398,13 @@ def train(hparams, scope=None, target_session=""):
                                       summary_writer, global_step)
 
             train_sess.run(
-                train_model.iterator_src.initializer,
+                [train_model.iterator_src.initializer, train_model.iterator_tgt.initializer],
                 feed_dict={train_model.skip_count_placeholder: 0})
-            train_sess.run(
-                train_model.iterator_tgt.initializer,
-                feed_dict={train_model.skip_count_placeholder: 0})
+
+            with infer_model.graph.as_default():
+                loaded_infer_model, _ = model_helper.create_or_load_model(
+                    infer_model.model, model_dir, infer_sess, "infer")
+
             continue
 
         # Process step_result, accumulate stats, and write summary
@@ -609,7 +600,8 @@ def _sample_decode(model, global_step, sess, hparams,
         summary_writer.add_summary(attention_summary, global_step)
 
 
-def _external_eval(model, global_step, sess, hparams, iterator,
+def _external_eval(model, global_step, sess, hparams,
+                   iterator_src, iterator_tgt,
                    iterator_feed_dict, tgt_file, label, summary_writer,
                    save_on_best, avg_ckpts=False):
     """External evaluation such as BLEU and ROUGE scores."""
@@ -622,7 +614,7 @@ def _external_eval(model, global_step, sess, hparams, iterator,
     if decode:
         utils.print_out("# External evaluation, global step %d" % global_step)
 
-    sess.run(iterator.initializer, feed_dict=iterator_feed_dict)
+    sess.run([iterator_src.initializer, iterator_tgt.initializer], feed_dict=iterator_feed_dict)
 
     output = os.path.join(out_dir, "output_%s" % label)
     scores = nmt_utils.decode_and_evaluate(
