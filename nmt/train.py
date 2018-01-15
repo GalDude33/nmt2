@@ -386,8 +386,8 @@ def train(hparams, scope=None, target_session=""):
                               infer_model.src_placeholder, infer_model.tgt_placeholder,
                               infer_model.batch_size_placeholder)
             step_result_ae, step_result_D = loaded_train_model.train(train_sess,
-                                                                     (original_funcs_src, translated_funcs_tgt),
-                                                                     (original_funcs_tgt, translated_funcs_src))
+                                                                     original_funcs_src, translated_funcs_tgt,
+                                                                     original_funcs_tgt, translated_funcs_src)
             hparams.epoch_step += 1
         except tf.errors.OutOfRangeError:
             with infer_model.graph.as_default():
