@@ -372,8 +372,9 @@ def train(hparams, scope=None, target_session=""):
     stats, info, start_train_time = before_train(
         loaded_train_model, train_model, train_sess, global_step, hparams, log_f)
 
-    loaded_infer_model, _ = model_helper.create_or_load_model(
-        infer_model.model, model_dir, infer_sess, "infer")
+    with infer_model.graph.as_default():
+        loaded_infer_model, _ = model_helper.create_or_load_model(
+            infer_model.model, model_dir, infer_sess, "infer")
     while global_step < num_train_steps:
         ### Run a step ###
         start_time = time.time()
