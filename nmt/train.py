@@ -107,7 +107,7 @@ def run_external_eval(infer_model, infer_sess, model_dir, hparams,
 
     dev_src_file = "%s.%s" % (hparams.dev_prefix, hparams.src)
     dev_tgt_file = "%s.%s" % (hparams.dev_prefix, hparams.tgt)
-    dev_infer_iterator_src_feed_dict = {
+    dev_infer_iterator_feed_dict = {
         infer_model.src_placeholder: inference.load_data(dev_src_file),
         infer_model.tgt_placeholder: inference.load_data(dev_tgt_file),
         infer_model.batch_size_placeholder: hparams.infer_batch_size,
@@ -118,7 +118,7 @@ def run_external_eval(infer_model, infer_sess, model_dir, hparams,
         infer_sess,
         hparams,
         infer_model.iterator_src, infer_model.iterator_tgt,
-        dev_infer_iterator_src_feed_dict,
+        dev_infer_iterator_feed_dict,
         dev_tgt_file,
         "dev",
         summary_writer,
@@ -606,7 +606,7 @@ def _external_eval(model, global_step, sess, hparams,
                    save_on_best, avg_ckpts=False):
     """External evaluation such as BLEU and ROUGE scores."""
     out_dir = hparams.out_dir
-    decode = global_step > 0
+    decode = False  # TODO: uncomment: global_step > 0
 
     if avg_ckpts:
         label = "avg_" + label
