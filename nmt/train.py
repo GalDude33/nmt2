@@ -51,11 +51,6 @@ def run_sample_decode(infer_model, infer_sess, model_dir, hparams,
                    src_data, tgt_data,
                    infer_model.tgt_placeholder, infer_model.src_placeholder,
                    infer_model.batch_size_placeholder, summary_writer)
-    # TODO: same for tgt
-    # _sample_decode(loaded_infer_model, global_step, infer_sess, hparams,
-    #                infer_model.iterator_src, src_data, tgt_data,
-    #                infer_model.src_placeholder,
-    #                infer_model.batch_size_placeholder, summary_writer)
 
 
 def run_internal_eval(
@@ -376,12 +371,15 @@ def train(hparams, scope=None, target_session=""):
     # This is the training loop.
     stats, info, start_train_time = before_train(
         loaded_train_model, train_model, train_sess, global_step, hparams, log_f)
+
+    loaded_infer_model, _ = model_helper.create_or_load_model(
+        infer_model.model, model_dir, infer_sess, "infer")
     while global_step < num_train_steps:
         ### Run a step ###
         start_time = time.time()
         try:
             (original_funcs_src, translated_funcs_tgt), (original_funcs_tgt, translated_funcs_src) = \
-                _sample_infer(infer_model, infer_sess, hparams,
+                _sample_infer(loaded_infer_model, infer_sess, hparams,
                               infer_model.iterator_src, infer_model.iterator_tgt,
                               sample_src_data, sample_tgt_data,
                               infer_model.src_placeholder, infer_model.tgt_placeholder,
@@ -391,6 +389,10 @@ def train(hparams, scope=None, target_session=""):
                                                                      (original_funcs_tgt, translated_funcs_src))
             hparams.epoch_step += 1
         except tf.errors.OutOfRangeError:
+            with infer_model.graph.as_default():
+                loaded_infer_model, _ = model_helper.create_or_load_model(
+                    infer_model.model, model_dir, infer_sess, "infer")
+
             # Finished going through the training dataset.  Go to next epoch.
             hparams.epoch_step = 0
             utils.print_out(
