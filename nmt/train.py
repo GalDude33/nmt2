@@ -386,8 +386,8 @@ def train(hparams, scope=None, target_session=""):
                               infer_model.src_placeholder, infer_model.tgt_placeholder,
                               infer_model.batch_size_placeholder)
             step_result_ae, step_result_D = loaded_train_model.train(train_sess,
-                                                                     original_funcs_src, translated_funcs_tgt,
-                                                                     original_funcs_tgt, translated_funcs_src)
+                                                                     original_funcs_src, translated_funcs_tgt[:,:,0],
+                                                                     original_funcs_tgt, translated_funcs_src[:,:,0])
             hparams.epoch_step += 1
         except tf.errors.OutOfRangeError:
             with infer_model.graph.as_default():
@@ -543,7 +543,9 @@ def _internal_eval(model, global_step, sess,
     """Computing perplexity."""
     sess.run(iterator_src.initializer, feed_dict=iterator_src_feed_dict)
     sess.run(iterator_tgt.initializer, feed_dict=iterator_tgt_feed_dict)
-    ppl = model_helper.compute_perplexity(model, sess, label)
+    ppl = 0
+    # TODO: remove comment
+    # ppl = model_helper.compute_perplexity(model, sess, label)
     utils.add_summary(summary_writer, global_step, "%s_ppl" % label, ppl)
     return ppl
 
