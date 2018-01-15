@@ -61,10 +61,6 @@ class BaseModel(object):
       extra_args: model_helper.ExtraArgs, for passing customizable functions.
 
     """
-        self.original_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
-        self.original_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
-        self.translated_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
-        self.translated_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
         assert isinstance(iterator_src, iterator_utils.BatchedInput)
         assert isinstance(iterator_tgt, iterator_utils.BatchedInput)
         self.iterator_src = iterator_src
@@ -77,6 +73,12 @@ class BaseModel(object):
         self.tgt_vocab_size = hparams.tgt_vocab_size
         self.num_gpus = hparams.num_gpus
         self.time_major = hparams.time_major
+
+        if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
+            self.original_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
+            self.original_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
+            self.translated_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
+            self.translated_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
 
         # extra_args: to make it flexible for adding external customizable code
         self.single_cell_fn = None
