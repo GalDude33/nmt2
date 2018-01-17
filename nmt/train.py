@@ -281,7 +281,8 @@ def before_train(loaded_train_model, train_model, train_sess, global_step,
     skip_count = hparams.batch_size * hparams.epoch_step
     utils.print_out("# Init train iterator, skipping %d elements" % skip_count)
     train_sess.run(
-        [train_model.iterator_src.initializer, train_model.iterator_tgt.initializer],
+        [train_model.iterator_src.initializer, train_model.iterator_tgt.initializer,
+         train_model.iterator_trans_src.initializer, train_model.iterator_trans_tgt.initializer],
         feed_dict={train_model.skip_count_placeholder: skip_count})
     return stats, info, start_train_time
 
@@ -364,22 +365,24 @@ def train(hparams, scope=None, target_session=""):
     stats, info, start_train_time = before_train(
         loaded_train_model, train_model, train_sess, global_step, hparams, log_f)
 
-    with infer_model.graph.as_default():
-        loaded_infer_model, _ = model_helper.create_or_load_model(
-            infer_model.model, model_dir, infer_sess, "infer")
+    # with infer_model.graph.as_default():
+    #     loaded_infer_model, _ = model_helper.create_or_load_model(
+    #         infer_model.model, model_dir, infer_sess, "infer")
+    # # Translate all and save to file
+    # (original_funcs_src, translated_funcs_tgt), (original_funcs_tgt, translated_funcs_src) = \
+    #     _sample_infer(loaded_infer_model, infer_sess, hparams,
+    #                   infer_model.iterator_src, infer_model.iterator_tgt,
+    #                   sample_src_data, sample_tgt_data,
+    #                   infer_model.src_placeholder, infer_model.tgt_placeholder,
+    #                   infer_model.batch_size_placeholder)
+
     while global_step < num_train_steps:
         ### Run a step ###
         start_time = time.time()
         try:
-            (original_funcs_src, translated_funcs_tgt), (original_funcs_tgt, translated_funcs_src) = \
-                _sample_infer(loaded_infer_model, infer_sess, hparams,
-                              infer_model.iterator_src, infer_model.iterator_tgt,
-                              sample_src_data, sample_tgt_data,
-                              infer_model.src_placeholder, infer_model.tgt_placeholder,
-                              infer_model.batch_size_placeholder)
-            step_result_ae, step_result_D = loaded_train_model.train(train_sess,
-                                                                     original_funcs_src, translated_funcs_tgt[:, :, 0],
-                                                                     original_funcs_tgt, translated_funcs_src[:, :, 0])
+            step_result_ae, step_result_D = loaded_train_model.train(train_sess) #,
+                                                                     #original_funcs_src, translated_funcs_tgt[:, :, 0],
+                                                                     #original_funcs_tgt, translated_funcs_src[:, :, 0])
             hparams.epoch_step += 1
         except tf.errors.OutOfRangeError:
             # Finished going through the training dataset.  Go to next epoch.
@@ -398,12 +401,13 @@ def train(hparams, scope=None, target_session=""):
                                       summary_writer, global_step)
 
             train_sess.run(
-                [train_model.iterator_src.initializer, train_model.iterator_tgt.initializer],
+                [train_model.iterator_src.initializer, train_model.iterator_tgt.initializer,
+                 train_model.iterator_trans_src.initializer, train_model.iterator_trans_tgt.initializer],
                 feed_dict={train_model.skip_count_placeholder: 0})
-
-            with infer_model.graph.as_default():
-                loaded_infer_model, _ = model_helper.create_or_load_model(
-                    infer_model.model, model_dir, infer_sess, "infer")
+            #
+            # with infer_model.graph.as_default():
+            #     loaded_infer_model, _ = model_helper.create_or_load_model(
+            #         infer_model.model, model_dir, infer_sess, "infer")
 
             continue
 
@@ -534,9 +538,7 @@ def _internal_eval(model, global_step, sess,
     """Computing perplexity."""
     sess.run(iterator_src.initializer, feed_dict=iterator_src_feed_dict)
     sess.run(iterator_tgt.initializer, feed_dict=iterator_tgt_feed_dict)
-    ppl = 0
-    # TODO: remove comment
-    # ppl = model_helper.compute_perplexity(model, sess, label)
+    ppl = 0 # TODO: model_helper.compute_perplexity(model, sess, label)
     utils.add_summary(summary_writer, global_step, "%s_ppl" % label, ppl)
     return ppl
 
@@ -580,14 +582,16 @@ def _sample_decode(model, global_step, sess, hparams,
     sess.run([iterator_src.initializer, iterator_tgt.initializer],
              feed_dict=iterator_feed_dict)
 
-    nmt_outputs, attention_summary = model.decode(sess)
+    (nmt_outputs_src, attention_summary_src), (nmt_outputs_tgt, attention_summary_tgt) = model.decode(sess)
 
     if hparams.beam_width > 0:
         # get the top translation.
-        nmt_outputs = nmt_outputs[0]
+        nmt_outputs_src = nmt_outputs_src[0]
+        nmt_outputs_tgt = nmt_outputs_tgt[0]
 
+    # TODO: add for tgt
     translation = nmt_utils.get_translation(
-        nmt_outputs,
+        nmt_outputs_src,
         sent_id=0,
         tgt_eos=hparams.eos,
         subword_option=hparams.subword_option)
@@ -596,8 +600,32 @@ def _sample_decode(model, global_step, sess, hparams,
     utils.print_out(b"    nmt: " + translation)
 
     # Summary
-    if attention_summary is not None:
-        summary_writer.add_summary(attention_summary, global_step)
+    if attention_summary_src is not None:
+        summary_writer.add_summary(attention_summary_src, global_step)
+        summary_writer.add_summary(attention_summary_tgt, global_step)
+
+    sess.run([iterator_src.initializer, iterator_tgt.initializer],
+             feed_dict=iterator_feed_dict)
+    # Real translation
+    (nmt_outputs_src, attention_summary_src), (nmt_outputs_tgt, attention_summary_tgt) = model.decode_cross(sess)
+
+    if hparams.beam_width > 0:
+        # get the top translation.
+        nmt_outputs_src = nmt_outputs_src[0]
+        nmt_outputs_tgt = nmt_outputs_tgt[0]
+    translation = nmt_utils.get_translation(
+        nmt_outputs_src,
+        sent_id=0,
+        tgt_eos=hparams.eos,
+        subword_option=hparams.subword_option)
+    utils.print_out("    src: %s" % src_data[decode_id])
+    #utils.print_out("    ref: %s" % tgt_data[decode_id])
+    utils.print_out(b"    nmt: " + translation)
+
+    # Summary
+    if attention_summary_src is not None:
+        summary_writer.add_summary(attention_summary_src, global_step)
+        summary_writer.add_summary(attention_summary_tgt, global_step)
 
 
 def _external_eval(model, global_step, sess, hparams,
@@ -606,7 +634,7 @@ def _external_eval(model, global_step, sess, hparams,
                    save_on_best, avg_ckpts=False):
     """External evaluation such as BLEU and ROUGE scores."""
     out_dir = hparams.out_dir
-    decode = False  # TODO: uncomment: global_step > 0
+    decode = global_step > 0
 
     if avg_ckpts:
         label = "avg_" + label

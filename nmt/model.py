@@ -42,8 +42,11 @@ class BaseModel(object):
                  mode,
                  iterator_src: iterator_utils.BatchedInput,
                  iterator_tgt: iterator_utils.BatchedInput,
+                 iterator_trans_src: iterator_utils.BatchedInput,
+                 iterator_trans_tgt: iterator_utils.BatchedInput,
                  source_vocab_table,
                  target_vocab_table,
+                 reverse_source_vocab_table=None,
                  reverse_target_vocab_table=None,
                  scope=None,
                  extra_args=None):
@@ -74,11 +77,13 @@ class BaseModel(object):
         self.num_gpus = hparams.num_gpus
         self.time_major = hparams.time_major
 
-        if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
-            self.original_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
-            self.original_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
-            self.translated_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
-            self.translated_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
+        self.iterator_trans_src = iterator_trans_src
+        self.iterator_trans_tgt = iterator_trans_tgt
+        #if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
+            # self.original_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
+            # self.original_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
+            # self.translated_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
+            # self.translated_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
 
         # extra_args: to make it flexible for adding external customizable code
         self.single_cell_fn = None
@@ -119,21 +124,27 @@ class BaseModel(object):
                     hparams.tgt_vocab_size, use_bias=False, name="output_projection_tgt")
 
         # Train graph
-        res = self.build_graph(hparams, scope=scope)
+        src2src, tgt2tgt, src2tgt, tgt2src, train_loss_ae, train_loss_D = \
+            self.build_graph(hparams, scope=scope)
 
         if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
-            self.train_loss_ae = res[2]
-            self.train_loss_D = res[3]
+            self.train_loss_ae = train_loss_ae
+            self.train_loss_D = train_loss_D
             self.word_count_src = tf.reduce_sum(
                 self.iterator_src.source_sequence_length) + tf.reduce_sum(
                 self.iterator_src.target_sequence_length)
         elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
-            self.eval_loss = res[2]
+            self.eval_loss = train_loss_ae
         elif self.mode == tf.contrib.learn.ModeKeys.INFER:
-            self.infer_logits_src, self.final_context_state_src, self.sample_id_src = res[0]
-            self.infer_logits_tgt, self.final_context_state_tgt, self.sample_id_tgt = res[1]
-            self.sample_words_src = reverse_target_vocab_table.lookup(tf.to_int64(self.sample_id_src))
+            self.infer_logits_src, self.final_context_state_src, self.sample_id_src = src2src
+            self.infer_logits_tgt, self.final_context_state_tgt, self.sample_id_tgt = tgt2tgt
+            (self.infer_cross_logits_src, self.final_context_state_cross_src, self.sample_id_cross_src) = tgt2src
+            (self.infer_cross_logits_tgt, self.final_context_state_cross_tgt, self.sample_id_cross_tgt) = tgt2src
+
+            self.sample_words_src = reverse_source_vocab_table.lookup(tf.to_int64(self.sample_id_src))
             self.sample_words_tgt = reverse_target_vocab_table.lookup(tf.to_int64(self.sample_id_tgt))
+            self.sample_words_src_cross = reverse_source_vocab_table.lookup(tf.to_int64(self.sample_id_cross_src))
+            self.sample_words_tgt_cross = reverse_target_vocab_table.lookup(tf.to_int64(self.sample_id_cross_tgt))
 
         if self.mode != tf.contrib.learn.ModeKeys.INFER:
             ## Count the number of predicted words for compute ppl.
@@ -190,6 +201,7 @@ class BaseModel(object):
 
         if self.mode == tf.contrib.learn.ModeKeys.INFER:
             self.infer_summary_src, self.infer_summary_tgt = self._get_infer_summary(hparams)
+            self.infer_summary_src_cross, self.infer_summary_tgt_cross = self._get_infer_summary_cross(hparams)
 
         # Saver
         self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=hparams.num_keep_ckpts)
@@ -284,9 +296,9 @@ class BaseModel(object):
                 scope=scope, ))
         # self.embedding_decoder = self.embedding_encoder
 
-    def train(self, sess,
-              original_funcs_src, translated_funcs_src,
-              original_funcs_tgt, translated_funcs_tgt):
+    def train(self, sess):#,
+              #original_funcs_src, translated_funcs_src,
+              #original_funcs_tgt, translated_funcs_tgt):
         assert self.mode == tf.contrib.learn.ModeKeys.TRAIN
         # TODO: check for predict_count_tgt & word_count_tgt
         res_ae = sess.run([self.update_ae,
@@ -297,13 +309,13 @@ class BaseModel(object):
                            self.word_count_src,
                            self.batch_size,
                            self.grad_norm_ae,
-                           self.learning_rate],
-                          feed_dict={
-                              self.original_funcs_src_: original_funcs_src,
-                              self.translated_funcs_src_: translated_funcs_src,
-                              self.original_funcs_tgt_: original_funcs_tgt,
-                              self.translated_funcs_tgt_: translated_funcs_tgt,
-                          })
+                           self.learning_rate])
+                          # feed_dict={
+                          #     self.original_funcs_src_: original_funcs_src,
+                          #     self.translated_funcs_src_: translated_funcs_src,
+                          #     self.original_funcs_tgt_: original_funcs_tgt,
+                          #     self.translated_funcs_tgt_: translated_funcs_tgt,
+                          # })
         res_D = sess.run([self.update_D,
                           self.train_loss_D,
                           self.train_summary_D])
@@ -340,6 +352,9 @@ class BaseModel(object):
         dtype = tf.float32
 
         with tf.variable_scope(scope or "dynamic_seq2seq", dtype=dtype):
+            ############################
+            ########### AUTO ###########
+            ############################
             # Encoder
             encoder_outputs_src, encoder_state_src = self._build_encoder(
                 hparams, iterator=self.iterator_src, embedding=self.embedding_src)
@@ -365,16 +380,20 @@ class BaseModel(object):
                 vocab_table=self.tgt_vocab_table, output_layer=self.output_layer_tgt,
                 sos=hparams.sos_2tgt)
 
-            # Cross Domain Translation
-            # Tanslate with infer model
+            ###################################
+            ############ CROSS ################
+            ###################################
+            logits_src_cross, sample_id_src_cross, final_context_state_src_cross = self._build_decoder(
+                encoder_outputs_tgt, encoder_state_tgt, hparams,
+                iterator=self.iterator_trans_src, embedding=self.embedding_src,
+                vocab_table=self.src_vocab_table, output_layer=self.output_layer_src,
+                sos=hparams.sos_2src)
 
-            #Encode with src, tgt
-            # encoder_outputs_src, encoder_state_src = self._build_encoder(
-            #     hparams, iterator=, embedding=self.embedding_src)
-            # encoder_outputs_tgt, encoder_state_tgt = self._build_encoder(
-            #     hparams, iterator=#, embedding=self.embedding_tgt)
-
-            # Decode with tgt, src
+            logits_tgt_cross, sample_id_tgt_cross, final_context_state_tgt_cross = self._build_decoder(
+                encoder_outputs_src, encoder_state_src, hparams,
+                iterator=self.iterator_trans_tgt, embedding=self.embedding_tgt,
+                vocab_table=self.tgt_vocab_table, output_layer=self.output_layer_tgt,
+                sos=hparams.sos_2tgt)
 
             # Loss
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
@@ -382,6 +401,11 @@ class BaseModel(object):
                                                            self.num_gpus)):
                     loss_auto_src = self._compute_loss(logits_src, self.iterator_src)
                     loss_auto_tgt = self._compute_loss(logits_tgt, self.iterator_tgt)
+
+                    loss_cross_src = \
+                        self._compute_loss(logits_src_cross, self.iterator_trans_src)
+                    loss_cross_tgt = \
+                        self._compute_loss(logits_tgt_cross, self.iterator_trans_tgt)
 
                     D_labels_src = tf.zeros_like(self.iterator_src.source)
                     loss_D_src = self._compute_discriminator_loss(discriminator_logits_src,
@@ -395,14 +419,17 @@ class BaseModel(object):
                                                                     1 - D_labels_tgt)
                     loss_adv = tf.add(loss_adv_src, loss_adv_tgt, name='loss_adv')
                     loss_auto_total = tf.add(loss_auto_src, loss_auto_tgt, 'total_auto_loss')
+                    loss_cross_total = tf.add(loss_cross_src, loss_cross_tgt, 'total_cross_loss')
                     loss_D_total = tf.add(loss_D_src, loss_D_tgt, 'total_D_loss')
-                    loss = tf.add_n([loss_auto_total, loss_D_total], 'total_loss')
+                    loss = tf.add_n([loss_auto_total, loss_D_total, loss_cross_total], 'total_loss')
             else:
                 loss = None
                 loss_adv = None
 
             return (logits_src, final_context_state_src, sample_id_src), \
                    (logits_tgt, final_context_state_tgt, sample_id_tgt), \
+                   (logits_src_cross, final_context_state_src_cross, sample_id_src_cross), \
+                   (logits_tgt_cross, final_context_state_tgt_cross, sample_id_tgt_cross), \
                    loss, loss_adv
 
     @abc.abstractmethod
@@ -608,6 +635,16 @@ class BaseModel(object):
     def _get_infer_summary(self, hparams):
         return tf.no_op(), tf.no_op()
 
+    def _get_infer_summary_cross(self, hparams):
+        return tf.no_op(), tf.no_op()
+
+    def infer_cross(self, sess):
+        assert self.mode == tf.contrib.learn.ModeKeys.INFER
+        return sess.run([
+            (self.infer_cross_logits_src, self.infer_summary_src_cross, self.sample_id_cross_src, self.sample_words_src_cross),
+            (self.infer_cross_logits_tgt, self.infer_summary_tgt_cross, self.sample_id_cross_tgt, self.sample_words_tgt_cross)
+        ])
+
     def infer(self, sess):
         assert self.mode == tf.contrib.learn.ModeKeys.INFER
         return sess.run([
@@ -618,9 +655,24 @@ class BaseModel(object):
     def infer_and_source(self, sess):
         assert self.mode == tf.contrib.learn.ModeKeys.INFER
         return sess.run([
-            (self.iterator_src.source, self.infer_logits_src, self.infer_summary_src, self.sample_id_src, self.sample_words_src),
-            (self.iterator_tgt.source, self.infer_logits_tgt, self.infer_summary_tgt, self.sample_id_tgt, self.sample_words_tgt)
+            (self.iterator_src.source, self.infer_logits_src, self.infer_summary_src, self.sample_id_src,
+             self.sample_words_src),
+            (self.iterator_tgt.source, self.infer_logits_tgt, self.infer_summary_tgt, self.sample_id_tgt,
+             self.sample_words_tgt)
         ])
+
+    def decode_cross(self, sess):
+        (_, infer_summary_src, _, sample_words_src), (_, infer_summary_tgt, _, sample_words_tgt) = self.infer_cross(sess)
+
+        # make sure outputs is of shape [batch_size, time] or [beam_width,
+        # batch_size, time] when using beam search.
+        if self.time_major:
+            sample_words_src = sample_words_src.transpose()
+            sample_words_tgt = sample_words_tgt.transpose()
+        elif sample_words_src.ndim == 3:  # beam search output in [batch_size, time, beam_width] shape.
+            sample_words_src = sample_words_src.transpose([2, 0, 1])
+            sample_words_tgt = sample_words_tgt.transpose([2, 0, 1])
+        return (sample_words_src, infer_summary_src), (sample_words_tgt, infer_summary_tgt)
 
     def decode(self, sess):
         """Decode a batch.
@@ -632,16 +684,17 @@ class BaseModel(object):
       A tuple consiting of outputs, infer_summary.
         outputs: of size [batch_size, time]
     """
-        (_, infer_summary, _, sample_words), _ = self.infer(sess)
+        (_, infer_summary_src, _, sample_words_src), (_, infer_summary_tgt, _, sample_words_tgt) = self.infer(sess)
 
         # make sure outputs is of shape [batch_size, time] or [beam_width,
         # batch_size, time] when using beam search.
         if self.time_major:
-            sample_words = sample_words.transpose()
-        elif sample_words.ndim == 3:  # beam search output in [batch_size,
-            # time, beam_width] shape.
-            sample_words = sample_words.transpose([2, 0, 1])
-        return sample_words, infer_summary
+            sample_words_src = sample_words_src.transpose()
+            sample_words_tgt = sample_words_tgt.transpose()
+        elif sample_words_src.ndim == 3:  # beam search output in [batch_size, time, beam_width] shape.
+            sample_words_src = sample_words_src.transpose([2, 0, 1])
+            sample_words_tgt = sample_words_tgt.transpose([2, 0, 1])
+        return (sample_words_src, infer_summary_src), (sample_words_tgt, infer_summary_tgt)
 
     def _build_discriminator(self, outputs):
         with tf.variable_scope("discriminator", reuse=tf.AUTO_REUSE):

@@ -39,8 +39,11 @@ class GNMTModel(attention_model.AttentionModel):
                  mode,
                  iterator_src,
                  iterator_tgt,
+                 iterator_trans_src,
+                 iterator_trans_tgt,
                  source_vocab_table,
                  target_vocab_table,
+                 reverse_source_vocab_table=None,
                  reverse_target_vocab_table=None,
                  scope=None,
                  extra_args=None):
@@ -49,8 +52,11 @@ class GNMTModel(attention_model.AttentionModel):
             mode=mode,
             iterator_src=iterator_src,
             iterator_tgt=iterator_tgt,
+            iterator_trans_src=iterator_trans_src,
+            iterator_trans_tgt=iterator_trans_tgt,
             source_vocab_table=source_vocab_table,
             target_vocab_table=target_vocab_table,
+            reverse_source_vocab_table=reverse_source_vocab_table,
             reverse_target_vocab_table=reverse_target_vocab_table,
             scope=scope,
             extra_args=extra_args)
