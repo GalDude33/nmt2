@@ -75,6 +75,29 @@ def get_infer_iterator(src_dataset,
         target_sequence_length=None)
 
 
+# def get_iterator_2(src_dataset,
+#                     tgt_dataset,
+#                     src_vocab_table,
+#                     tgt_vocab_table,
+#                     batch_size,
+#                     sos,
+#                     eos,
+#                     random_seed,
+#                     num_buckets,
+#                     src_max_len=None,
+#                     tgt_max_len=None,
+#                     num_parallel_calls=4,
+#                     output_buffer_size=None,
+#                     skip_count=None,
+#                     num_shards=1,
+#                     shard_index=0,
+#                     reshuffle_each_iteration=True,
+#                     infer_model):
+#     infer_model
+#
+#     pass
+
+
 def get_iterator(src_dataset,
                  tgt_dataset,
                  src_vocab_table,

@@ -53,7 +53,7 @@ def decode_and_evaluate(name,
                 min(num_translations_per_input, beam_width), 1)
             while True:
                 try:
-                    nmt_outputs, _ = model.decode(sess)
+                    (nmt_outputs_src, _), (nmt_outputs_tgt, _) = model.decode_cross(sess)
                     if beam_width == 0:
                         nmt_outputs = np.expand_dims(nmt_outputs, 0)
 
