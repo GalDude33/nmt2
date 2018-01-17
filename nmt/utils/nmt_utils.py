@@ -55,15 +55,15 @@ def decode_and_evaluate(name,
                 try:
                     (nmt_outputs_src, _), (nmt_outputs_tgt, _) = model.decode_cross(sess)
                     if beam_width == 0:
-                        nmt_outputs = np.expand_dims(nmt_outputs, 0)
+                        nmt_outputs_src = np.expand_dims(nmt_outputs_src, 0)
 
-                    batch_size = nmt_outputs.shape[1]
+                    batch_size = nmt_outputs_src.shape[1]
                     num_sentences += batch_size
 
                     for sent_id in range(batch_size):
                         for beam_id in range(num_translations_per_input):
                             translation = get_translation(
-                                nmt_outputs[beam_id],
+                                nmt_outputs_src[beam_id],
                                 sent_id,
                                 tgt_eos=tgt_eos,
                                 subword_option=subword_option)
