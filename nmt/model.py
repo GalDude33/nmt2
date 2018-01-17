@@ -40,10 +40,10 @@ class BaseModel(object):
     def __init__(self,
                  hparams,
                  mode,
-                 iterator_src: iterator_utils.BatchedInput,
-                 iterator_tgt: iterator_utils.BatchedInput,
-                 iterator_trans_src: iterator_utils.BatchedInput,
-                 iterator_trans_tgt: iterator_utils.BatchedInput,
+                 iterator_s2s: iterator_utils.BatchedInput,
+                 iterator_t2t: iterator_utils.BatchedInput,
+                 iterator_s2t: iterator_utils.BatchedInput,
+                 iterator_t2s: iterator_utils.BatchedInput,
                  source_vocab_table,
                  target_vocab_table,
                  reverse_source_vocab_table=None,
@@ -64,10 +64,15 @@ class BaseModel(object):
       extra_args: model_helper.ExtraArgs, for passing customizable functions.
 
     """
-        assert isinstance(iterator_src, iterator_utils.BatchedInput)
-        assert isinstance(iterator_tgt, iterator_utils.BatchedInput)
-        self.iterator_src = iterator_src
-        self.iterator_tgt = iterator_tgt
+        assert isinstance(iterator_s2s, iterator_utils.BatchedInput)
+        assert isinstance(iterator_t2t, iterator_utils.BatchedInput)
+        assert isinstance(iterator_s2t, iterator_utils.BatchedInput)
+        assert isinstance(iterator_t2s, iterator_utils.BatchedInput)
+        self.iterator_s2s = iterator_s2s
+        self.iterator_t2t = iterator_t2t
+        self.iterator_s2t = iterator_s2t
+        self.iterator_t2s = iterator_t2s
+
         self.mode = mode
         self.src_vocab_table = source_vocab_table
         self.tgt_vocab_table = target_vocab_table
@@ -77,8 +82,8 @@ class BaseModel(object):
         self.num_gpus = hparams.num_gpus
         self.time_major = hparams.time_major
 
-        self.iterator_trans_src = iterator_trans_src
-        self.iterator_trans_tgt = iterator_trans_tgt
+        # self.iterator_trans_src = iterator_trans_src
+        # self.iterator_trans_tgt = iterator_trans_tgt
         #if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
             # self.original_funcs_src_ = tf.placeholder(iterator_src.source.dtype, shape=iterator_src.source.shape)
             # self.original_funcs_tgt_ = tf.placeholder(iterator_tgt.source.dtype, shape=iterator_tgt.source.shape)
@@ -113,7 +118,7 @@ class BaseModel(object):
         self.init_embeddings(hparams, scope)
 
         # TODO: iterator_tgt
-        self.batch_size = tf.size(self.iterator_src.source_sequence_length)
+        self.batch_size = tf.size(self.iterator_s2s.source_sequence_length)
 
         # Projection
         with tf.variable_scope(scope or "build_network"):
@@ -130,9 +135,9 @@ class BaseModel(object):
         if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
             self.train_loss_ae = train_loss_ae
             self.train_loss_D = train_loss_D
-            self.word_count_src = tf.reduce_sum(
-                self.iterator_src.source_sequence_length) + tf.reduce_sum(
-                self.iterator_src.target_sequence_length)
+            self.word_count_s2s = tf.reduce_sum(
+                self.iterator_s2s.source_sequence_length) + tf.reduce_sum(
+                self.iterator_s2s.target_sequence_length)
         elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
             self.eval_loss = train_loss_ae
         elif self.mode == tf.contrib.learn.ModeKeys.INFER:
@@ -148,10 +153,10 @@ class BaseModel(object):
 
         if self.mode != tf.contrib.learn.ModeKeys.INFER:
             ## Count the number of predicted words for compute ppl.
-            self.predict_count_src = tf.reduce_sum(
-                self.iterator_src.target_sequence_length)
-            self.predict_count_tgt = tf.reduce_sum(
-                self.iterator_tgt.target_sequence_length)
+            self.predict_count_s2s = tf.reduce_sum(
+                self.iterator_s2s.target_sequence_length)
+            self.predict_count_t2t = tf.reduce_sum(
+                self.iterator_t2t.target_sequence_length)
 
         self.global_step = tf.Variable(0, trainable=False)
 
@@ -303,10 +308,10 @@ class BaseModel(object):
         # TODO: check for predict_count_tgt & word_count_tgt
         res_ae = sess.run([self.update_ae,
                            self.train_loss_ae,
-                           self.predict_count_src,
+                           self.predict_count_s2s,
                            self.train_summary,
                            self.global_step,
-                           self.word_count_src,
+                           self.word_count_s2s,
                            self.batch_size,
                            self.grad_norm_ae,
                            self.learning_rate])
@@ -325,7 +330,7 @@ class BaseModel(object):
         assert self.mode == tf.contrib.learn.ModeKeys.EVAL
         # TODO: predict_count_tgt
         return sess.run([self.eval_loss,
-                         self.predict_count_src,
+                         self.predict_count_s2s,
                          self.batch_size])
 
     def build_graph(self, hparams, scope=None):
@@ -355,81 +360,105 @@ class BaseModel(object):
             ############################
             ########### AUTO ###########
             ############################
-            # Encoder
-            encoder_outputs_src, encoder_state_src = self._build_encoder(
-                hparams, iterator=self.iterator_src, embedding=self.embedding_src)
-            encoder_outputs_tgt, encoder_state_tgt = self._build_encoder(
-                hparams, iterator=self.iterator_tgt, embedding=self.embedding_tgt)
+            with tf.variable_scope(scope or "auto", dtype=dtype):
+                # Encoder
+                encoder_outputs_s2s, encoder_state_s2s = self._build_encoder(
+                    hparams, iterator=self.iterator_s2s, embedding=self.embedding_src)
+                encoder_outputs_t2t, encoder_state_t2t = self._build_encoder(
+                    hparams, iterator=self.iterator_t2t, embedding=self.embedding_tgt)
 
-            # Discriminator
-            discriminator_logits_src, _ = \
-                self._build_discriminator(encoder_outputs_src)
-            discriminator_logits_tgt, _ = \
-                self._build_discriminator(encoder_outputs_tgt)
+                # Discriminator
+                discriminator_logits_s2s, _ = \
+                    self._build_discriminator(encoder_outputs_s2s)
+                discriminator_logits_t2t, _ = \
+                    self._build_discriminator(encoder_outputs_t2t)
 
-            # Decoder
-            logits_src, sample_id_src, final_context_state_src = self._build_decoder(
-                encoder_outputs_src, encoder_state_src, hparams,
-                iterator=self.iterator_src, embedding=self.embedding_src,
-                vocab_table=self.src_vocab_table, output_layer=self.output_layer_src,
-                sos=hparams.sos_2src)
+                # Decoder
+                logits_s2s, sample_id_s2s, final_context_state_s2s = self._build_decoder(
+                    encoder_outputs_s2s, encoder_state_s2s, hparams,
+                    iterator=self.iterator_s2s, embedding=self.embedding_src,
+                    vocab_table=self.src_vocab_table, output_layer=self.output_layer_src,
+                    sos=hparams.sos_2src)
 
-            logits_tgt, sample_id_tgt, final_context_state_tgt = self._build_decoder(
-                encoder_outputs_tgt, encoder_state_tgt, hparams,
-                iterator=self.iterator_tgt, embedding=self.embedding_tgt,
-                vocab_table=self.tgt_vocab_table, output_layer=self.output_layer_tgt,
-                sos=hparams.sos_2tgt)
+                logits_t2t, sample_id_t2t, final_context_state_t2t = self._build_decoder(
+                    encoder_outputs_t2t, encoder_state_t2t, hparams,
+                    iterator=self.iterator_t2t, embedding=self.embedding_tgt,
+                    vocab_table=self.tgt_vocab_table, output_layer=self.output_layer_tgt,
+                    sos=hparams.sos_2tgt)
 
-            ###################################
-            ############ CROSS ################
-            ###################################
-            logits_src_cross, sample_id_src_cross, final_context_state_src_cross = self._build_decoder(
-                encoder_outputs_tgt, encoder_state_tgt, hparams,
-                iterator=self.iterator_trans_src, embedding=self.embedding_src,
-                vocab_table=self.src_vocab_table, output_layer=self.output_layer_src,
-                sos=hparams.sos_2src)
+            with tf.variable_scope(scope or "cross", dtype=dtype):
+                ###################################
+                ############ CROSS ################
+                ###################################
+                # Encoder
+                encoder_outputs_s2t, encoder_state_s2t = self._build_encoder(
+                    hparams, iterator=self.iterator_s2t, embedding=self.embedding_src)
+                encoder_outputs_t2s, encoder_state_t2s = self._build_encoder(
+                    hparams, iterator=self.iterator_t2s, embedding=self.embedding_tgt)
 
-            logits_tgt_cross, sample_id_tgt_cross, final_context_state_tgt_cross = self._build_decoder(
-                encoder_outputs_src, encoder_state_src, hparams,
-                iterator=self.iterator_trans_tgt, embedding=self.embedding_tgt,
-                vocab_table=self.tgt_vocab_table, output_layer=self.output_layer_tgt,
-                sos=hparams.sos_2tgt)
+                # Discriminator
+                discriminator_logits_s2t, _ = \
+                    self._build_discriminator(encoder_outputs_s2t)
+                discriminator_logits_t2s, _ = \
+                    self._build_discriminator(encoder_outputs_t2s)
+
+                logits_s2t, sample_id_s2t, final_context_state_s2t = self._build_decoder(
+                    encoder_outputs_s2t, encoder_state_s2t, hparams,
+                    iterator=self.iterator_s2t, embedding=self.embedding_tgt,
+                    vocab_table=self.tgt_vocab_table, output_layer=self.output_layer_tgt,
+                    sos=hparams.sos_2tgt)
+
+                logits_t2s, sample_id_t2s, final_context_state_t2s = self._build_decoder(
+                    encoder_outputs_t2s, encoder_state_t2s, hparams,
+                    iterator=self.iterator_t2s, embedding=self.embedding_src,
+                    vocab_table=self.src_vocab_table, output_layer=self.output_layer_src,
+                    sos=hparams.sos_2src)
 
             # Loss
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
                 with tf.device(model_helper.get_device_str(self.num_encoder_layers - 1,
                                                            self.num_gpus)):
-                    loss_auto_src = self._compute_loss(logits_src, self.iterator_src)
-                    loss_auto_tgt = self._compute_loss(logits_tgt, self.iterator_tgt)
+                    loss_auto_s2s = self._compute_loss(logits_s2s, self.iterator_s2s)
+                    loss_auto_t2t = self._compute_loss(logits_t2t, self.iterator_t2t)
 
-                    loss_cross_src = \
-                        self._compute_loss(logits_src_cross, self.iterator_trans_src)
-                    loss_cross_tgt = \
-                        self._compute_loss(logits_tgt_cross, self.iterator_trans_tgt)
+                    loss_cross_s2t = self._compute_loss(logits_s2t, self.iterator_s2t)
+                    loss_cross_t2s = self._compute_loss(logits_t2s, self.iterator_t2s)
 
-                    D_labels_src = tf.zeros_like(self.iterator_src.source)
-                    loss_D_src = self._compute_discriminator_loss(discriminator_logits_src,
-                                                                  D_labels_src)
-                    D_labels_tgt = tf.ones_like(self.iterator_tgt.source)
-                    loss_D_tgt = self._compute_discriminator_loss(discriminator_logits_tgt,
-                                                                  D_labels_tgt)
-                    loss_adv_src = self._compute_discriminator_loss(discriminator_logits_src,
-                                                                    1 - D_labels_src)
-                    loss_adv_tgt = self._compute_discriminator_loss(discriminator_logits_tgt,
-                                                                    1 - D_labels_tgt)
-                    loss_adv = tf.add(loss_adv_src, loss_adv_tgt, name='loss_adv')
-                    loss_auto_total = tf.add(loss_auto_src, loss_auto_tgt, 'total_auto_loss')
-                    loss_cross_total = tf.add(loss_cross_src, loss_cross_tgt, 'total_cross_loss')
-                    loss_D_total = tf.add(loss_D_src, loss_D_tgt, 'total_D_loss')
+                    D_labels_s2s = tf.zeros_like(self.iterator_s2s.source)
+                    loss_D_s2s = self._compute_discriminator_loss(discriminator_logits_s2s,
+                                                                  D_labels_s2s)
+                    D_labels_s2t = tf.zeros_like(self.iterator_s2t.source)
+                    loss_D_s2t = self._compute_discriminator_loss(discriminator_logits_s2t,
+                                                                  D_labels_s2t)
+                    D_labels_t2t = tf.ones_like(self.iterator_t2t.source)
+                    loss_D_t2t = self._compute_discriminator_loss(discriminator_logits_t2t,
+                                                                  D_labels_t2t)
+                    D_labels_t2s = tf.ones_like(self.iterator_t2s.source)
+                    loss_D_t2s = self._compute_discriminator_loss(discriminator_logits_t2s,
+                                                                  D_labels_t2s)
+
+                    # adv
+                    loss_adv_s2s = self._compute_discriminator_loss(discriminator_logits_s2s,
+                                                                    1 - D_labels_s2s)
+                    loss_adv_s2t = self._compute_discriminator_loss(discriminator_logits_s2t,
+                                                                    1 - D_labels_s2t)
+                    loss_adv_t2t = self._compute_discriminator_loss(discriminator_logits_t2t,
+                                                                    1 - D_labels_t2t)
+                    loss_adv_t2s = self._compute_discriminator_loss(discriminator_logits_t2s,
+                                                                    1 - D_labels_t2s)
+                    loss_adv = tf.add_n([loss_adv_s2s, loss_adv_s2t, loss_adv_t2t, loss_adv_t2s], name='loss_adv')
+                    loss_auto_total = tf.add(loss_auto_s2s, loss_auto_t2t, 'total_auto_loss')
+                    loss_cross_total = tf.add(loss_cross_s2t, loss_cross_t2s, 'total_cross_loss')
+                    loss_D_total = tf.add_n([loss_D_s2s, loss_D_s2t, loss_D_t2t, loss_D_t2s], 'total_D_loss')
                     loss = tf.add_n([loss_auto_total, loss_D_total, loss_cross_total], 'total_loss')
             else:
                 loss = None
                 loss_adv = None
 
-            return (logits_src, final_context_state_src, sample_id_src), \
-                   (logits_tgt, final_context_state_tgt, sample_id_tgt), \
-                   (logits_src_cross, final_context_state_src_cross, sample_id_src_cross), \
-                   (logits_tgt_cross, final_context_state_tgt_cross, sample_id_tgt_cross), \
+            return (logits_s2s, final_context_state_s2s, sample_id_s2s), \
+                   (logits_t2t, final_context_state_t2t, sample_id_t2t), \
+                   (logits_s2t, final_context_state_s2t, sample_id_s2t), \
+                   (logits_t2s, final_context_state_t2s, sample_id_t2s), \
                    loss, loss_adv
 
     @abc.abstractmethod

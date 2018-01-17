@@ -37,10 +37,10 @@ class GNMTModel(attention_model.AttentionModel):
     def __init__(self,
                  hparams,
                  mode,
-                 iterator_src,
-                 iterator_tgt,
-                 iterator_trans_src,
-                 iterator_trans_tgt,
+                 iterator_s2s,
+                 iterator_t2t,
+                 iterator_s2t,
+                 iterator_t2s,
                  source_vocab_table,
                  target_vocab_table,
                  reverse_source_vocab_table=None,
@@ -50,10 +50,10 @@ class GNMTModel(attention_model.AttentionModel):
         super(GNMTModel, self).__init__(
             hparams=hparams,
             mode=mode,
-            iterator_src=iterator_src,
-            iterator_tgt=iterator_tgt,
-            iterator_trans_src=iterator_trans_src,
-            iterator_trans_tgt=iterator_trans_tgt,
+            iterator_s2s=iterator_s2s,
+            iterator_t2t=iterator_t2t,
+            iterator_s2t=iterator_s2t,
+            iterator_t2s=iterator_t2s,
             source_vocab_table=source_vocab_table,
             target_vocab_table=target_vocab_table,
             reverse_source_vocab_table=reverse_source_vocab_table,
@@ -214,7 +214,6 @@ class GNMTModel(attention_model.AttentionModel):
             return tf.no_op(), tf.no_op()
         return attention_model._create_attention_images_summary(self.final_context_state_src[0]), \
                attention_model._create_attention_images_summary(self.final_context_state_tgt[0]),
-
 
 
 class GNMTAttentionMultiCell(tf.nn.rnn_cell.MultiRNNCell):
