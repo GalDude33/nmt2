@@ -393,8 +393,8 @@ def train(hparams, scope=None, target_session=""):
                                       summary_writer, global_step)
 
             train_sess.run(
-                [train_model.iterator_src.initializer, train_model.iterator_tgt.initializer,
-                 train_model.iterator_trans_src.initializer, train_model.iterator_trans_tgt.initializer],
+                [train_model.iterator_s2s.initializer, train_model.iterator_t2t.initializer,
+                 train_model.iterator_s2t.initializer, train_model.iterator_t2s.initializer],
                 feed_dict={train_model.skip_count_placeholder: 0})
             #
             # with infer_model.graph.as_default():
