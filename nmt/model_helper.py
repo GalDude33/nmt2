@@ -75,8 +75,9 @@ def create_train_model(
     tgt_file = "%s.%s" % (hparams.train_prefix, hparams.tgt)
     
     # TODO: change to real translation file
-    src_file_trans = "%s.%s" % (hparams.test_prefix, hparams.src)
-    tgt_file_trans = "%s.%s" % (hparams.test_prefix, hparams.tgt)
+    file_trans = hparams.out_dir + '/translated_dev'
+    src_file_trans = file_trans + '.' + hparams.src
+    tgt_file_trans = file_trans + '.' + hparams.tgt
     src_vocab_file = hparams.src_vocab_file
     tgt_vocab_file = hparams.tgt_vocab_file
 
@@ -87,8 +88,8 @@ def create_train_model(
             src_vocab_file, tgt_vocab_file, hparams.share_vocab)
 
         # TODO: delete skip
-        src_dataset = tf.data.TextLineDataset(src_file)#.skip(60000)
-        tgt_dataset = tf.data.TextLineDataset(tgt_file)#.skip(60000)
+        src_dataset = tf.data.TextLineDataset(src_file)#.skip(25000)
+        tgt_dataset = tf.data.TextLineDataset(tgt_file)#.skip(25000)
         src_trans_dataset = tf.data.TextLineDataset(src_file_trans)#.skip(60000)
         tgt_trans_dataset = tf.data.TextLineDataset(tgt_file_trans)#.skip(60000)
 
@@ -130,11 +131,6 @@ def create_train_model(
         ##################################
         ############## LOL ###############
         ##################################
-        # src_trans_placeholder = tf.placeholder(shape=[None], dtype=tf.string)
-        # tgt_trans_placeholder = tf.placeholder(shape=[None], dtype=tf.string)
-        # src_orig_placeholder = tf.placeholder(shape=[None], dtype=tf.string)
-        # tgt_orig_placeholder = tf.placeholder(shape=[None], dtype=tf.string)
-
         iterator_s2t = iterator_utils.get_iterator(
             src_trans_dataset,
             tgt_dataset,
@@ -219,10 +215,9 @@ def create_eval_model(model_creator, hparams, scope=None, extra_args=None):
         src_dataset = tf.data.TextLineDataset(src_file_placeholder)
         tgt_dataset = tf.data.TextLineDataset(tgt_file_placeholder)
 
-        src_file_trans = "%s.%s" % (hparams.test_prefix, hparams.src)
-        tgt_file_trans = "%s.%s" % (hparams.test_prefix, hparams.tgt)
-        src_trans_dataset = tf.data.TextLineDataset(src_file_trans)
-        tgt_trans_dataset = tf.data.TextLineDataset(tgt_file_trans)
+        file_trans = hparams.out_dir+'/translated_dev'
+        src_trans_dataset = tf.data.TextLineDataset(file_trans+'.'+hparams.src)
+        tgt_trans_dataset = tf.data.TextLineDataset(file_trans+'.'+hparams.tgt)
 
         # set real values
         iterator_s2s = iterator_utils.get_iterator(

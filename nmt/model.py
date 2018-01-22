@@ -144,7 +144,7 @@ class BaseModel(object):
             self.infer_logits_src, self.final_context_state_src, self.sample_id_src = src2src
             self.infer_logits_tgt, self.final_context_state_tgt, self.sample_id_tgt = tgt2tgt
             (self.infer_cross_logits_src, self.final_context_state_cross_src, self.sample_id_cross_src) = tgt2src
-            (self.infer_cross_logits_tgt, self.final_context_state_cross_tgt, self.sample_id_cross_tgt) = tgt2src
+            (self.infer_cross_logits_tgt, self.final_context_state_cross_tgt, self.sample_id_cross_tgt) = src2tgt
 
             self.sample_words_src = reverse_source_vocab_table.lookup(tf.to_int64(self.sample_id_src))
             self.sample_words_tgt = reverse_target_vocab_table.lookup(tf.to_int64(self.sample_id_tgt))

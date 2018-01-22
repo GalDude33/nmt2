@@ -113,6 +113,7 @@ def run_external_eval(infer_model, infer_sess, model_dir, hparams,
         hparams,
         infer_model.iterator_src, infer_model.iterator_tgt,
         dev_infer_iterator_feed_dict,
+        dev_src_file,
         dev_tgt_file,
         "dev",
         summary_writer,
@@ -135,6 +136,7 @@ def run_external_eval(infer_model, infer_sess, model_dir, hparams,
             hparams,
             infer_model.iterator_src, infer_model.iterator_tgt,
             test_infer_iterator_feed_dict,
+            test_src_file,
             test_tgt_file,
             "test",
             summary_writer,
@@ -625,7 +627,8 @@ def _sample_decode(model, global_step, sess, hparams,
 
 def _external_eval(model, global_step, sess, hparams,
                    iterator_src, iterator_tgt,
-                   iterator_feed_dict, tgt_file, label, summary_writer,
+                   iterator_feed_dict,
+                   src_file, tgt_file, label, summary_writer,
                    save_on_best, avg_ckpts=False):
     """External evaluation such as BLEU and ROUGE scores."""
     out_dir = hparams.out_dir
@@ -639,18 +642,23 @@ def _external_eval(model, global_step, sess, hparams,
 
     sess.run([iterator_src.initializer, iterator_tgt.initializer], feed_dict=iterator_feed_dict)
 
-    output = os.path.join(out_dir, "output_%s" % label)
-    scores = nmt_utils.decode_and_evaluate(
-        label,
-        model,
-        sess,
-        output,
-        ref_file=tgt_file,
-        metrics=hparams.metrics,
-        subword_option=hparams.subword_option,
-        beam_width=hparams.beam_width,
-        tgt_eos=hparams.eos,
-        decode=decode)
+    output = os.path.join(out_dir, "translated_%s" % label)
+    scores_src = \
+        nmt_utils.decode_and_evaluate(
+            label,
+            model,
+            sess,
+            output,
+            src_ref_file=src_file,
+            tgt_ref_file=tgt_file,
+            metrics=hparams.metrics,
+            subword_option=hparams.subword_option,
+            beam_width=hparams.beam_width,
+            src_eos=hparams.eos,
+            tgt_eos=hparams.eos,
+            hparams=hparams,
+            decode=decode)
+
     # Save on best metrics
     if decode:
         for metric in hparams.metrics:
@@ -663,11 +671,11 @@ def _external_eval(model, global_step, sess, hparams,
                               scores[metric])
             # metric: larger is better
             if save_on_best and scores[metric] > getattr(hparams, best_metric_label):
-                setattr(hparams, best_metric_label, scores[metric])
+                setattr(hparams, best_metric_label, scores_src[metric])
                 model.saver.save(
                     sess,
                     os.path.join(
                         getattr(hparams, best_metric_label + "_dir"), "translate.ckpt"),
                     global_step=model.global_step)
         utils.save_hparams(out_dir, hparams)
-    return scores
+    return scores_src
