@@ -31,11 +31,14 @@ def decode_and_evaluate(name,
                         model,
                         sess,
                         trans_file,
-                        ref_file,
+                        src_ref_file,
+                        tgt_ref_file,
                         metrics,
                         subword_option,
                         beam_width,
                         tgt_eos,
+                        src_eos,
+                        hparams,
                         num_translations_per_input=1,
                         decode=True):
     """Decode a test set and compute a score according to the evaluation task."""
@@ -46,41 +49,50 @@ def decode_and_evaluate(name,
         start_time = time.time()
         num_sentences = 0
         with codecs.getwriter("utf-8")(
-                tf.gfile.GFile(trans_file, mode="wb")) as trans_f:
-            trans_f.write("")  # Write empty string to ensure file is created.
+                tf.gfile.GFile(trans_file+'.'+hparams.src, mode="wb")) as src_trans_f:
+            with codecs.getwriter("utf-8")(
+                    tf.gfile.GFile(trans_file+'.'+hparams.tgt, mode="wb")) as tgt_trans_f:
+                src_trans_f.write("")  # Write empty string to ensure file is created.
+                tgt_trans_f.write("")  # Write empty string to ensure file is created.
 
-            num_translations_per_input = max(
-                min(num_translations_per_input, beam_width), 1)
-            while True:
-                try:
-                    (nmt_outputs_src, _), (nmt_outputs_tgt, _) = model.decode_cross(sess)
-                    if beam_width == 0:
-                        nmt_outputs_src = np.expand_dims(nmt_outputs_src, 0)
+                num_translations_per_input = max(
+                    min(num_translations_per_input, beam_width), 1)
+                while True:
+                    try:
+                        (nmt_outputs_src, _), (nmt_outputs_tgt, _) = model.decode_cross(sess)
+                        if beam_width == 0:
+                            nmt_outputs_src = np.expand_dims(nmt_outputs_src, 0)
 
-                    batch_size = nmt_outputs_src.shape[1]
-                    num_sentences += batch_size
+                        batch_size = nmt_outputs_src.shape[1]
+                        num_sentences += batch_size
 
-                    for sent_id in range(batch_size):
-                        for beam_id in range(num_translations_per_input):
-                            translation = get_translation(
-                                nmt_outputs_src[beam_id],
-                                sent_id,
-                                tgt_eos=tgt_eos,
-                                subword_option=subword_option)
-                            trans_f.write((translation + b"\n").decode("utf-8"))
-                except tf.errors.OutOfRangeError:
-                    utils.print_time(
-                        "  done, num sentences %d, num translations per input %d" %
-                        (num_sentences, num_translations_per_input), start_time)
-                    break
+                        for sent_id in range(batch_size):
+                            for beam_id in range(num_translations_per_input):
+                                src_translation = get_translation(
+                                    nmt_outputs_src[beam_id],
+                                    sent_id,
+                                    tgt_eos=src_eos,
+                                    subword_option=subword_option)
+                                src_trans_f.write((src_translation + b"\n").decode("utf-8"))
+                                tgt_translation = get_translation(
+                                    nmt_outputs_tgt[beam_id],
+                                    sent_id,
+                                    tgt_eos=tgt_eos,
+                                    subword_option=subword_option)
+                                tgt_trans_f.write((tgt_translation + b"\n").decode("utf-8"))
+                    except tf.errors.OutOfRangeError:
+                        utils.print_time(
+                            "  done, num sentences %d, num translations per input %d" %
+                            (num_sentences, num_translations_per_input), start_time)
+                        break
 
     # Evaluation
     evaluation_scores = {}
-    if ref_file and tf.gfile.Exists(trans_file):
+    if src_ref_file and tf.gfile.Exists(trans_file):
         for metric in metrics:
             score = evaluation_utils.evaluate(
-                ref_file,
-                trans_file,
+                src_ref_file,
+                src_trans_file,
                 metric,
                 subword_option=subword_option)
             evaluation_scores[metric] = score
